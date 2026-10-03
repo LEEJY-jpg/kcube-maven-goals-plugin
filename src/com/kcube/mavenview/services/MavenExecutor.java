@@ -31,6 +31,7 @@ import com.kcube.mavenview.model.MavenGoal;
  */
 public final class MavenExecutor
 {
+	/** 유틸리티 클래스이므로 인스턴스를 만들 수 없다. */
 	private MavenExecutor()
 	{
 	}
@@ -201,6 +202,7 @@ public final class MavenExecutor
 		return cachedLoginShellPath;
 	}
 
+	/** Eclipse Error Log에 이 플러그인 이름으로 메시지를 기록한다. */
 	private static void log(int severity, String message, Throwable e)
 	{
 		Platform.getLog(MavenExecutor.class).log(new Status(severity, "com.kcube.mavenview", message, e));

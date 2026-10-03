@@ -19,6 +19,7 @@ import com.kcube.mavenview.model.MavenGoal;
  */
 public final class MavenPomParser
 {
+	/** 유틸리티 클래스이므로 인스턴스를 만들 수 없다. */
 	private MavenPomParser()
 	{
 	}
@@ -135,6 +136,7 @@ public final class MavenPomParser
 		return s == null ? null : s.trim();
 	}
 
+	/** parent의 자식 목록에 child를 추가한다. 목록이 아직 없으면 새로 만든다. */
 	private static void addChild(MavenGoal parent, MavenGoal child)
 	{
 		CHILDREN.computeIfAbsent(parent, k -> new java.util.ArrayList<>()).add(child);

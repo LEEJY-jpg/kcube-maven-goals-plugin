@@ -97,6 +97,7 @@ public final class MavenGoalsView extends ViewPart
 		}
 	};
 
+	/** 뷰의 UI를 구성한다. 검색창과 트리를 만들고, 콘텐츠/라벨 프로바이더·필터·드래그앤드롭·툴바를 설정한 뒤 저장된 pom.xml 목록을 불러온다. */
 	@Override
 	public void createPartControl(Composite parent)
 	{
@@ -116,6 +117,7 @@ public final class MavenGoalsView extends ViewPart
 		// 트리 데이터는 뷰가 직접 들고 있지 않고 projects 맵(최상위) + MavenPomParser.CHILDREN(하위)에서 가져온다.
 		viewer.setContentProvider(new ITreeContentProvider()
 		{
+			/** 최상위 PROJECT 노드들을 이름순으로 반환한다. */
 			@Override
 			public Object[] getElements(Object input)
 			{
@@ -124,29 +126,34 @@ public final class MavenGoalsView extends ViewPart
 					java.util.Comparator.comparing(MavenGoal::getName, String.CASE_INSENSITIVE_ORDER)).toArray();
 			}
 
+			/** 노드의 자식(Lifecycle/Plugins/goal 등) 목록을 반환한다. */
 			@Override
 			public Object[] getChildren(Object parent)
 			{
 				return MavenPomParser.children((MavenGoal) parent).toArray();
 			}
 
+			/** 노드의 부모를 반환한다. */
 			@Override
 			public Object getParent(Object element)
 			{
 				return ((MavenGoal) element).getParent();
 			}
 
+			/** 노드가 자식을 갖고 있는지 반환한다. */
 			@Override
 			public boolean hasChildren(Object element)
 			{
 				return !MavenPomParser.children((MavenGoal) element).isEmpty();
 			}
 
+			/** 해제할 리소스가 없어 아무 동작도 하지 않는다. */
 			@Override
 			public void dispose()
 			{
 			}
 
+			/** 입력값을 쓰지 않으므로 아무 동작도 하지 않는다. */
 			@Override
 			public void inputChanged(Viewer viewer, Object oldInput, Object newInput)
 			{
@@ -168,6 +175,7 @@ public final class MavenGoalsView extends ViewPart
 		});
 		viewer.addFilter(new ViewerFilter()
 		{
+			/** 검색어가 비어 있으면 모두 통과시키고, 아니면 검색어와 일치하는 노드(와 그 경로)만 통과시킨다. */
 			@Override
 			public boolean select(Viewer v, Object parentElement, Object element)
 			{
@@ -191,6 +199,7 @@ public final class MavenGoalsView extends ViewPart
 		loadRegisteredPoms();
 	}
 
+	/** 뷰가 닫힐 때 외부 선택 추적 리스너를 해제한다. */
 	@Override
 	public void dispose()
 	{
@@ -225,6 +234,7 @@ public final class MavenGoalsView extends ViewPart
 		return hasMatchingDescendant(g);
 	}
 
+	/** 노드의 후손 중 검색어와 일치하는 것이 하나라도 있으면 true를 반환한다. */
 	private boolean hasMatchingDescendant(MavenGoal g)
 	{
 		for (MavenGoal child : MavenPomParser.children(g))
@@ -259,6 +269,7 @@ public final class MavenGoalsView extends ViewPart
 		target.setTransfer(new Transfer[] {FileTransfer.getInstance(), ResourceTransfer.getInstance()});
 		target.addDropListener(new DropTargetAdapter()
 		{
+			/** 드래그 중인 항목이 들어올 때 기본 동작을 복사(COPY)로 지정한다. */
 			@Override
 			public void dragEnter(DropTargetEvent event)
 			{
@@ -266,6 +277,7 @@ public final class MavenGoalsView extends ViewPart
 					event.detail = DND.DROP_COPY;
 			}
 
+			/** 드롭된 파일/리소스에서 pom.xml을 찾아 등록하고, 등록이 있었으면 목록을 저장한다. */
 			@Override
 			public void drop(DropTargetEvent event)
 			{
@@ -323,6 +335,7 @@ public final class MavenGoalsView extends ViewPart
 		// 실행 불가능한 노드가 선택된 경우 runSelectedGoal()이 조용히 무시한다.
 		Action run = new Action("Run")
 		{
+			/** 선택된 goal을 실행한다(더블클릭과 동일). */
 			@Override
 			public void run()
 			{
@@ -334,6 +347,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action updateProject = new Action("Update Maven Project")
 		{
+			/** 선택된 프로젝트에 대해 Update Maven Project를 수행한다. */
 			@Override
 			public void run()
 			{
@@ -347,6 +361,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action add = new Action("Add POM File...")
 		{
+			/** 파일 다이얼로그로 pom.xml을 골라 등록한다. */
 			@Override
 			public void run()
 			{
@@ -358,6 +373,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action addFromSelection = new Action("Add from Selection")
 		{
+			/** 다른 뷰에서 마지막으로 선택한 리소스의 pom.xml을 등록한다. */
 			@Override
 			public void run()
 			{
@@ -369,6 +385,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action remove = new Action("Remove")
 		{
+			/** 선택된 프로젝트를 등록 목록에서 제거한다. */
 			@Override
 			public void run()
 			{
@@ -380,6 +397,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action refresh = new Action("Refresh All")
 		{
+			/** 등록된 모든 pom.xml을 다시 파싱한다. */
 			@Override
 			public void run()
 			{
@@ -392,6 +410,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action expandAll = new Action("Expand All")
 		{
+			/** 선택된 노드 하위(없으면 트리 전체)를 모두 펼친다. */
 			@Override
 			public void run()
 			{
@@ -409,6 +428,7 @@ public final class MavenGoalsView extends ViewPart
 
 		Action collapseAll = new Action("Collapse All")
 		{
+			/** 트리 전체를 접는다. */
 			@Override
 			public void run()
 			{
@@ -423,6 +443,7 @@ public final class MavenGoalsView extends ViewPart
 		// Composite로 한 번 감싸는 이유는 GridData(CENTER)로 세로 정렬을 맞추기 위함.
 		ControlContribution useExternalCheckbox = new ControlContribution("useExternalMvnCheckbox")
 		{
+			/** "mvn" 체크박스를 담은 컨트롤을 만든다. 상태가 바뀌면 실행 방식을 preference에 저장한다. */
 			@Override
 			protected Control createControl(Composite parent)
 			{
@@ -721,6 +742,7 @@ public final class MavenGoalsView extends ViewPart
 			new Status(severity, "com.kcube.mavenview", message, e));
 	}
 
+	/** 뷰가 활성화되면 포커스를 트리에 준다. */
 	@Override
 	public void setFocus()
 	{
@@ -733,6 +755,7 @@ public final class MavenGoalsView extends ViewPart
 	{
 		private final Font boldFont = JFaceResources.getFontRegistry().getBold(JFaceResources.DEFAULT_FONT);
 
+		/** 플러그인 노드는 artifactId만, 그 외 노드는 이름을 그대로 표시한다. */
 		@Override
 		public String getText(Object element)
 		{
@@ -741,12 +764,14 @@ public final class MavenGoalsView extends ViewPart
 			return element.toString();
 		}
 
+		/** 플러그인 노드는 굵은 글꼴을, 그 외 노드는 기본 글꼴(null)을 사용한다. */
 		@Override
 		public Font getFont(Object element)
 		{
 			return element instanceof MavenGoal g && isPluginEntry(g) ? boldFont : null;
 		}
 
+		/** 노드가 [groupId, artifactId]를 가진 개별 플러그인 항목인지 확인한다. */
 		private static boolean isPluginEntry(MavenGoal g)
 		{
 			return g.getType() == MavenGoal.Type.PLUGIN && g.getArguments().length == 2;

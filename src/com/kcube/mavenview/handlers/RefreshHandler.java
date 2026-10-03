@@ -14,6 +14,7 @@ import com.kcube.mavenview.views.MavenGoalsView;
  */
 public final class RefreshHandler extends AbstractHandler
 {
+	/** Refresh 커맨드 실행 시 호출된다. Maven Goals 뷰가 열려 있으면 등록된 모든 pom.xml을 다시 파싱한다. */
 	@Override
 	public Object execute(ExecutionEvent event) throws ExecutionException
 	{
