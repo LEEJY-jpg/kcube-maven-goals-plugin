@@ -79,6 +79,18 @@ public final class MavenGoalsView extends ViewPart
 	private TreeViewer viewer;
 	/** 검색창 입력값(소문자, 앞뒤 공백 제거). 비어 있으면 필터 없이 전체를 보여준다. */
 	private String filterText = "";
+	/** 검색 입력 후 이 시간(ms) 동안 추가 입력이 없을 때 한 번만 필터를 적용한다(디바운스). */
+	private static final int FILTER_DELAY_MS = 200;
+	/** 필터 결과가 이 개수 이하일 때만 자동으로 전부 펼친다. */
+	private static final int MAX_AUTO_EXPAND_NODES = 1000;
+	/** 결과가 많을 때 펼치는 깊이: 프로젝트(1) → Lifecycle/Plugins(2) → 개별 플러그인(3). */
+	private static final int PLUGIN_EXPAND_DEPTH = 3;
+	/** 현재 검색어 기준으로 트리에 보여줄 노드 집합(identity). null이면 다시 계산해야 한다는 뜻. */
+	private java.util.Set<MavenGoal> visibleNodes;
+	/** 노드별 소문자 검색 키(이름 + goal + 인자). 노드는 불변이므로 한 번만 만들어 재사용한다. */
+	private final java.util.Map<MavenGoal, String> searchKeys = new java.util.WeakHashMap<>();
+	/** 예약돼 있는(아직 실행 전인) 필터 적용 작업. 새 입력이 오면 취소하고 다시 예약한다. */
+	private Runnable pendingFilter;
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
 	private boolean useExternalMvn;
 	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
@@ -179,10 +191,10 @@ public final class MavenGoalsView extends ViewPart
 			@Override
 			public boolean select(Viewer v, Object parentElement, Object element)
 			{
-				return filterText.isEmpty() || matchesFilter((MavenGoal) element);
+				return filterText.isEmpty() || visibleNodes().contains(element);
 			}
 		});
-		filterBox.addModifyListener(e -> applyFilter(filterBox.getText()));
+		filterBox.addModifyListener(e -> scheduleFilter(filterBox));
 		filterBox.addListener(SWT.KeyDown, e -> {
 			if (e.keyCode == SWT.ESC)
 				filterBox.setText("");
@@ -204,45 +216,90 @@ public final class MavenGoalsView extends ViewPart
 	public void dispose()
 	{
 		getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(externalSelectionTracker);
+		if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
+			viewer.getControl().getDisplay().timerExec(-1, pendingFilter);
 		super.dispose();
+	}
+
+	/** 입력이 잠시 멈출 때까지 기다렸다가 필터를 적용한다. 키를 누를 때마다 트리를 다시 그리지 않도록 한다. */
+	private void scheduleFilter(Text filterBox)
+	{
+		org.eclipse.swt.widgets.Display display = filterBox.getDisplay();
+		if (pendingFilter != null)
+			display.timerExec(-1, pendingFilter);
+		pendingFilter = () -> {
+			pendingFilter = null;
+			if (!filterBox.isDisposed())
+				applyFilter(filterBox.getText());
+		};
+		display.timerExec(FILTER_DELAY_MS, pendingFilter);
 	}
 
 	/** 검색어를 갱신하고 트리를 다시 그린다. 필터 중에는 결과를 모두 펼치고, 해제하면 기본 펼침 깊이로 되돌린다. */
 	private void applyFilter(String text)
 	{
-		filterText = text.trim().toLowerCase();
-		viewer.refresh();
-		if (filterText.isEmpty())
+		String newText = text.trim().toLowerCase();
+		if (newText.equals(filterText))
+			return;
+		filterText = newText;
+		visibleNodes = null;
+		// 갱신 도중 중간 상태가 그려지지 않게 해 refresh/expand 비용을 줄인다.
+		viewer.getControl().setRedraw(false);
+		try
 		{
-			viewer.collapseAll();
-			viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+			viewer.refresh();
+			if (filterText.isEmpty())
+			{
+				viewer.collapseAll();
+				viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+			}
+			else if (visibleNodes().size() <= MAX_AUTO_EXPAND_NODES)
+			{
+				viewer.expandAll();
+			}
+			else
+			{
+				// 결과가 매우 많으면 전부 펼칠 때 SWT 항목을 수천 개 만들어 느려지므로 플러그인 단계까지만 펼친다.
+				viewer.expandToLevel(PLUGIN_EXPAND_DEPTH);
+			}
 		}
-		else
+		finally
 		{
-			viewer.expandAll();
+			viewer.getControl().setRedraw(true);
 		}
 	}
 
-	/** 노드 자신, 조상 중 하나, 또는 후손 중 하나가 검색어와 일치하면 true. (PROJECT 노드 이름은 매칭 대상이 아니다.) */
-	private boolean matchesFilter(MavenGoal g)
+	/** 현재 검색어에 대해 보여줄 노드 집합을 반환한다. 필요할 때 한 번만 계산해 캐시한다. */
+	private java.util.Set<MavenGoal> visibleNodes()
 	{
-		for (MavenGoal n = g; n != null; n = n.getParent())
+		if (visibleNodes == null)
 		{
-			if (selfMatches(n))
-				return true;
+			java.util.Set<MavenGoal> result = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+			for (MavenGoal root : projects.values())
+				collectVisible(root, false, result);
+			visibleNodes = result;
 		}
-		return hasMatchingDescendant(g);
+		return visibleNodes;
 	}
 
-	/** 노드의 후손 중 검색어와 일치하는 것이 하나라도 있으면 true를 반환한다. */
-	private boolean hasMatchingDescendant(MavenGoal g)
+	/**
+	 * 트리를 한 번만 순회하며 보여줄 노드를 result에 모은다. 노드는 자신이 일치하거나, 조상 중 하나가 일치하거나,
+	 * 후손 중 하나가 일치하면 보인다. (PROJECT 노드 이름은 매칭 대상이 아니다.)
+	 *
+	 * @return 이 노드가 보이면 true
+	 */
+	private boolean collectVisible(MavenGoal node, boolean ancestorMatched, java.util.Set<MavenGoal> result)
 	{
-		for (MavenGoal child : MavenPomParser.children(g))
+		boolean matchedHere = ancestorMatched || selfMatches(node);
+		boolean descendantMatched = false;
+		for (MavenGoal child : MavenPomParser.children(node))
 		{
-			if (selfMatches(child) || hasMatchingDescendant(child))
-				return true;
+			descendantMatched |= collectVisible(child, matchedHere, result);
 		}
-		return false;
+		boolean visible = matchedHere || descendantMatched;
+		if (visible)
+			result.add(node);
+		return visible;
 	}
 
 	/** 표시 이름, 실행 문자열(goal), 플러그인 groupId/artifactId 중 하나라도 검색어를 포함하는지 본다. */
@@ -250,16 +307,21 @@ public final class MavenGoalsView extends ViewPart
 	{
 		if (g.getType() == MavenGoal.Type.PROJECT)
 			return false;
-		if (g.getName().toLowerCase().contains(filterText))
-			return true;
-		if (g.getGoal() != null && g.getGoal().toLowerCase().contains(filterText))
-			return true;
+		return searchKeys.computeIfAbsent(g, MavenGoalsView::buildSearchKey).contains(filterText);
+	}
+
+	/** 노드의 이름, goal, 인자를 줄바꿈으로 이어 붙인 소문자 검색 키를 만든다. 검색어에는 줄바꿈이 없으므로 필드 경계를 넘는 오탐은 없다. */
+	private static String buildSearchKey(MavenGoal g)
+	{
+		StringBuilder key = new StringBuilder(g.getName());
+		if (g.getGoal() != null)
+			key.append('\n').append(g.getGoal());
 		for (String arg : g.getArguments())
 		{
-			if (arg != null && arg.toLowerCase().contains(filterText))
-				return true;
+			if (arg != null)
+				key.append('\n').append(arg);
 		}
-		return false;
+		return key.toString().toLowerCase();
 	}
 
 	/** Finder/Project Explorer 등에서 pom.xml 또는 프로젝트 폴더를 뷰로 끌어다 놓으면 자동 등록한다. */
@@ -633,6 +695,7 @@ public final class MavenGoalsView extends ViewPart
 	 */
 	private void removeSelected()
 	{
+		visibleNodes = null;
 		if (viewer.getSelection() instanceof IStructuredSelection ss)
 		{
 			boolean changed = false;
@@ -679,6 +742,7 @@ public final class MavenGoalsView extends ViewPart
 	/** pom.xml을 파싱해 projects 맵에 (교체) 등록하고, 기존에 같은 경로로 파싱된 트리가 있었다면 메모리에서 정리한다. */
 	private void reparse(File pomFile)
 	{
+		visibleNodes = null;
 		String key = key(pomFile);
 		try
 		{
