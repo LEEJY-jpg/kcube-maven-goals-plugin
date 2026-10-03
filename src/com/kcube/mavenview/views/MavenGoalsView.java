@@ -31,6 +31,7 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.FileDialog;
+import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.ISelectionListener;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IWorkbenchPart;
@@ -61,6 +62,8 @@ public final class MavenGoalsView extends ViewPart {
     private static final int TOP_LEVEL_EXPAND_DEPTH = 2;
 
     private TreeViewer viewer;
+    /** 검색창 입력값(소문자, 앞뒤 공백 제거). 비어 있으면 필터 없이 전체를 보여준다. */
+    private String filterText = "";
     /** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
     private boolean useExternalMvn;
     /** Absolute pom.xml path -> parsed project root, in registration order. */
@@ -77,7 +80,19 @@ public final class MavenGoalsView extends ViewPart {
 
     @Override
     public void createPartControl(Composite parent) {
+        // 위: 검색창, 아래: 트리.
+        GridLayout rootLayout = new GridLayout(1, false);
+        rootLayout.marginWidth = 0;
+        rootLayout.marginHeight = 0;
+        rootLayout.verticalSpacing = 0;
+        parent.setLayout(rootLayout);
+        Text filterBox = new Text(parent, SWT.SEARCH | SWT.ICON_SEARCH | SWT.ICON_CANCEL);
+        filterBox.setMessage("Filter goals");
+        filterBox.setToolTipText("Type a keyword to show only matching goals (Esc to clear)");
+        filterBox.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
+
         viewer = new TreeViewer(parent);
+        viewer.getControl().setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
         // 트리 데이터는 뷰가 직접 들고 있지 않고 projects 맵(최상위) + MavenPomParser.CHILDREN(하위)에서 가져온다.
         viewer.setContentProvider(new ITreeContentProvider() {
             @Override public Object[] getElements(Object input) {
@@ -106,6 +121,15 @@ public final class MavenGoalsView extends ViewPart {
                 runSelectedGoal();
             }
         });
+        viewer.addFilter(new ViewerFilter() {
+            @Override public boolean select(Viewer v, Object parentElement, Object element) {
+                return filterText.isEmpty() || matchesFilter((MavenGoal) element);
+            }
+        });
+        filterBox.addModifyListener(e -> applyFilter(filterBox.getText()));
+        filterBox.addListener(SWT.KeyDown, e -> {
+            if (e.keyCode == SWT.ESC) filterBox.setText("");
+        });
         viewer.setInput(new Object()); // 콘텐츠 프로바이더가 입력값 자체는 쓰지 않으므로 더미 객체로 충분.
         hookDragAndDrop();
 
@@ -122,6 +146,44 @@ public final class MavenGoalsView extends ViewPart {
     public void dispose() {
         getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(externalSelectionTracker);
         super.dispose();
+    }
+
+    /** 검색어를 갱신하고 트리를 다시 그린다. 필터 중에는 결과를 모두 펼치고, 해제하면 기본 펼침 깊이로 되돌린다. */
+    private void applyFilter(String text) {
+        filterText = text.trim().toLowerCase();
+        viewer.refresh();
+        if (filterText.isEmpty()) {
+            viewer.collapseAll();
+            viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+        } else {
+            viewer.expandAll();
+        }
+    }
+
+    /** 노드 자신, 조상 중 하나, 또는 후손 중 하나가 검색어와 일치하면 true. (PROJECT 노드 이름은 매칭 대상이 아니다.) */
+    private boolean matchesFilter(MavenGoal g) {
+        for (MavenGoal n = g; n != null; n = n.getParent()) {
+            if (selfMatches(n)) return true;
+        }
+        return hasMatchingDescendant(g);
+    }
+
+    private boolean hasMatchingDescendant(MavenGoal g) {
+        for (MavenGoal child : MavenPomParser.children(g)) {
+            if (selfMatches(child) || hasMatchingDescendant(child)) return true;
+        }
+        return false;
+    }
+
+    /** 표시 이름, 실행 문자열(goal), 플러그인 groupId/artifactId 중 하나라도 검색어를 포함하는지 본다. */
+    private boolean selfMatches(MavenGoal g) {
+        if (g.getType() == MavenGoal.Type.PROJECT) return false;
+        if (g.getName().toLowerCase().contains(filterText)) return true;
+        if (g.getGoal() != null && g.getGoal().toLowerCase().contains(filterText)) return true;
+        for (String arg : g.getArguments()) {
+            if (arg != null && arg.toLowerCase().contains(filterText)) return true;
+        }
+        return false;
     }
 
     /** Finder/Project Explorer 등에서 pom.xml 또는 프로젝트 폴더를 뷰로 끌어다 놓으면 자동 등록한다. */
