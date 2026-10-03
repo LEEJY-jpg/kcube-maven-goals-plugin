@@ -31,7 +31,6 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.FileDialog;
-import org.eclipse.m2e.core.ui.internal.UpdateMavenProjectJob;
 import org.eclipse.ui.ISelectionListener;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IWorkbenchPart;
@@ -297,12 +296,14 @@ public final class MavenGoalsView extends ViewPart {
     /** m2e 버전에 따라 생성자 시그니처(IProject[] / Collection)가 달라 리플렉션으로 호출한다. */
     private void scheduleUpdate(List<IProject> projects) {
         try {
+            // m2e 내부(internal) 클래스라 import하면 PDE 접근 제한 오류가 나므로 이름으로 로드한다.
+            Class<?> jobClass = Class.forName("org.eclipse.m2e.core.ui.internal.UpdateMavenProjectJob");
             Job job;
             try {
-                job = (Job) UpdateMavenProjectJob.class.getConstructor(IProject[].class)
+                job = (Job) jobClass.getConstructor(IProject[].class)
                         .newInstance((Object) projects.toArray(new IProject[0]));
             } catch (NoSuchMethodException e) {
-                job = (Job) UpdateMavenProjectJob.class.getConstructor(java.util.Collection.class)
+                job = (Job) jobClass.getConstructor(java.util.Collection.class)
                         .newInstance(projects);
             }
             job.schedule();
