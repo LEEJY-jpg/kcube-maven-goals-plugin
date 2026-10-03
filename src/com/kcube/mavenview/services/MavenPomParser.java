@@ -49,7 +49,7 @@ public final class MavenPomParser
 		"install",
 		"deploy"};
 
-	/** Parses a pom.xml into a PROJECT root node with Lifecycle/Plugins children. */
+	/** pom.xml을 파싱해 Lifecycle/Plugins를 자식으로 가진 PROJECT 루트 노드를 만든다. */
 	public static MavenGoal parseProject(File pom) throws Exception
 	{
 		DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
@@ -113,9 +113,9 @@ public final class MavenPomParser
 				for (int k = 0; k < goals.getLength(); k++)
 				{
 					String g = goals.item(k).getTextContent().trim();
-					// "plugin:goal@executionId" (Maven 3.3.1+) runs THIS execution's own
-					// <configuration> — plain "plugin:goal" would run the plugin's default-cli
-					// invocation instead, ignoring the execution block entirely.
+					// "plugin:goal@executionId"(Maven 3.3.1+)는 해당 execution 자신의
+					// <configuration>으로 실행한다. 그냥 "plugin:goal"로 실행하면 플러그인의 default-cli
+					// 실행이 돌아가 execution 블록은 완전히 무시된다.
 					String invocation = group + ":" + artifact + ":" + g + (id == null || id.isBlank() ? "" : "@" + id);
 					addChild(
 						plugin,
@@ -149,7 +149,7 @@ public final class MavenPomParser
 		return CHILDREN.getOrDefault(goal, java.util.List.of());
 	}
 
-	/** Recursively drops a parsed tree (e.g. a replaced or removed project root) from the children map. */
+	/** 파싱된 트리(예: 교체되거나 제거된 프로젝트 루트)를 자식 맵에서 재귀적으로 제거한다. */
 	public static void dispose(MavenGoal node)
 	{
 		List<MavenGoal> kids = CHILDREN.remove(node);

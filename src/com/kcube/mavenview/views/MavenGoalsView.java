@@ -81,11 +81,11 @@ public final class MavenGoalsView extends ViewPart
 	private String filterText = "";
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
 	private boolean useExternalMvn;
-	/** Absolute pom.xml path -> parsed project root, in registration order. */
+	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
 	/**
-	 * Last resource selected in some OTHER part (e.g. Project Explorer), kept so "Add from Selection" still works once
-	 * focus has moved to this view's own toolbar/tree.
+	 * 다른 파트(예: Project Explorer)에서 마지막으로 선택된 리소스. 포커스가 이 뷰의 툴바/트리로 넘어간 뒤에도
+	 * "Add from Selection"이 동작하도록 따로 보관해 둔다.
 	 */
 	private IResource lastExternalSelection;
 	private final ISelectionListener externalSelectionTracker = (IWorkbenchPart part, ISelection selection) -> {
@@ -727,8 +727,8 @@ public final class MavenGoalsView extends ViewPart
 		viewer.getControl().setFocus();
 	}
 
-	// Plugin entries carry [groupId, artifactId] in getArguments(); showing only the
-	// artifactId (and bolding it) keeps the long org.apache.maven.plugins:... ids readable.
+	// 플러그인 항목은 getArguments()에 [groupId, artifactId]를 담고 있다. artifactId만
+	// (굵게) 표시해야 긴 org.apache.maven.plugins:... 형태의 id도 읽기 쉽다.
 	private static final class MavenGoalLabelProvider extends LabelProvider implements IFontProvider
 	{
 		private final Font boldFont = JFaceResources.getFontRegistry().getBold(JFaceResources.DEFAULT_FONT);

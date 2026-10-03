@@ -52,8 +52,8 @@ public final class MavenExecutor
 		}
 	}
 
-	// Launches through m2e's own launch configuration (same path as "Run As > Maven Build"),
-	// so the bundled embedded Maven runtime is used and Eclipse manages the Console itself.
+	// m2e 자체 런치 설정으로 실행한다("Run As > Maven Build"와 동일한 경로).
+	// 따라서 Eclipse에 내장된 Maven 런타임이 쓰이고, Console도 Eclipse가 직접 관리한다.
 	private static void runEmbedded(File pom, String goalString)
 	{
 		try
@@ -73,7 +73,7 @@ public final class MavenExecutor
 		}
 	}
 
-	// Shells out to the external `mvn` on PATH (or the configured "maven.executable" preference).
+	// PATH의 외부 `mvn`(또는 설정된 "maven.executable" preference)을 셸로 호출해 실행한다.
 	private static void runExternal(File pom, String goalString)
 	{
 		// 실행마다 새 콘솔을 만들어 보여준다 (Eclipse 콘솔 뷰에 결과가 그대로 출력됨).
@@ -125,8 +125,8 @@ public final class MavenExecutor
 		worker.start();
 	}
 
-	// Common install locations for mvn that aren't always on a GUI-launched app's PATH,
-	// checked as a last resort when neither the preference nor the login shell's PATH has it.
+	// GUI로 띄운 앱의 PATH에는 항상 들어 있지는 않은 mvn의 일반적인 설치 위치들.
+	// preference에도, 로그인 셸의 PATH에도 mvn이 없을 때 마지막 수단으로 확인한다.
 	private static final String[] FALLBACK_MVN_LOCATIONS = {
 		"/opt/homebrew/bin/mvn",
 		"/usr/local/bin/mvn",
@@ -172,9 +172,9 @@ public final class MavenExecutor
 	private static volatile String cachedLoginShellPath;
 
 	/**
-	 * Eclipse launched via Finder/`open` only inherits launchd's minimal PATH, not the PATH a login shell sets up
-	 * (Homebrew, sdkman, nvm, ...), so bare "mvn" often resolves in a Terminal but fails here. Ask the user's own login
-	 * shell for its PATH once and reuse it for every external Maven invocation.
+	 * Finder/`open`으로 띄운 Eclipse는 launchd의 최소 PATH만 상속받고, 로그인 셸이 구성하는 PATH는 받지 못한다
+	 * (Homebrew, sdkman, nvm 등). 그래서 터미널에서는 "mvn"이 찾아져도 여기서는 실패하는 경우가 많다. 사용자의 로그인
+	 * 셸에 PATH를 한 번만 물어봐 캐시해 두고, 이후 모든 외부 Maven 실행에 재사용한다.
 	 */
 	private static synchronized String loginShellPath()
 	{
