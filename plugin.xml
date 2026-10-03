@@ -5,7 +5,7 @@
    <extension point="org.eclipse.ui.views">
       <view
          allowMultiple="false"
-         category="com.kcube.mavenview.category"
+         category="org.eclipse.m2e.core.views.repositories"
          class="com.kcube.mavenview.views.MavenGoalsView"
          icon="icons/m2.png"
          id="com.kcube.mavenview.views.mavenGoals"
