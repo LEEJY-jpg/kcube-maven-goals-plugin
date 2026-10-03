@@ -7,6 +7,7 @@
          allowMultiple="false"
          category="com.kcube.mavenview.category"
          class="com.kcube.mavenview.views.MavenGoalsView"
+         icon="icons/m2.png"
          id="com.kcube.mavenview.views.mavenGoals"
          name="Maven Goals"
          restorable="true"/>
