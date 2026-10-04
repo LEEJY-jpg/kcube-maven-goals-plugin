@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+
+   <extension point="org.eclipse.ui.views">
+      <view
+         allowMultiple="false"
+         category="org.eclipse.m2e.core.views.repositories"
+         class="com.kcube.mavenview.views.MavenGoalsView"
+         icon="icons/m2.png"
+         id="com.kcube.mavenview.views.mavenGoals"
+         name="%view.name"
+         restorable="true"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.commands">
+      <command
+         id="com.kcube.mavenview.commands.refresh"
+         name="%command.refresh.name"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.handlers">
+      <handler
+         commandId="com.kcube.mavenview.commands.refresh"
+         class="com.kcube.mavenview.handlers.RefreshHandler"/>
+   </extension>
+
+   <extension point="org.eclipse.ui.bindings">
+      <key
+         commandId="com.kcube.mavenview.commands.refresh"
+         contextId="org.eclipse.ui.contexts.window"
+         schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
+         sequence="M5+R"/>
+   </extension>
+
+</plugin>

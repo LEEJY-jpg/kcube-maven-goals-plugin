@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+   <feature id="com.kcube.mavenview.feature">
+      <category name="com.kcube.mavenview.category"/>
+   </feature>
+   <category-def name="com.kcube.mavenview.category" label="KCube Maven Tools">
+      <description>Maven lifecycle and goals tree view</description>
+   </category-def>
+</site>
