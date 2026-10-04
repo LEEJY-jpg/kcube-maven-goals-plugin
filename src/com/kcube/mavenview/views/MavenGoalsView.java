@@ -10,6 +10,7 @@ import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
+import org.eclipse.core.runtime.Adapters;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -24,7 +25,9 @@ import org.eclipse.jface.action.ControlContribution;
 import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.resource.JFaceResources;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.AbstractTreeViewer;
+import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.IFontProvider;
 import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ITreeViewerListener;
@@ -52,6 +55,7 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.FileDialog;
 import org.eclipse.swt.widgets.Menu;
+import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IMemento;
 import org.eclipse.ui.ISelectionListener;
@@ -60,6 +64,7 @@ import org.eclipse.ui.IViewSite;
 import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
+import org.eclipse.ui.dialogs.ListSelectionDialog;
 import org.eclipse.ui.part.ResourceTransfer;
 import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
@@ -67,9 +72,11 @@ import org.eclipse.ui.plugin.AbstractUIPlugin;
 import com.kcube.mavenview.model.MavenGoal;
 import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.services.GoalFilter;
+import com.kcube.mavenview.services.GoalHistory;
 import com.kcube.mavenview.services.GoalLabels;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
+import com.kcube.mavenview.services.PomScanner;
 import com.kcube.mavenview.services.RunOptions;
 
 /**
@@ -92,10 +99,6 @@ public final class MavenGoalsView extends ViewPart
 	private static final String PREF_OPT_UPDATE = "runOptions.updateSnapshots";
 	private static final String PREF_OPT_PROFILES = "runOptions.profiles";
 	private static final String PREF_OPT_EXTRA = "runOptions.extraArgs";
-	/** 즐겨찾기/최근 실행 항목 안에서 pom 경로와 goal 문자열을 구분하는 문자. */
-	private static final String ENTRY_SEP = "\t";
-	/** 최근 실행 목록에 보관할 최대 개수. */
-	private static final int MAX_RECENT = 10;
 	private static final String MEMENTO_TREE = "tree";
 	private static final String MEMENTO_EXPANDED = "expanded";
 	private static final String MEMENTO_PATH = "path";
@@ -124,10 +127,8 @@ public final class MavenGoalsView extends ViewPart
 	private Runnable pendingFilter;
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
 	private boolean useExternalMvn;
-	/** 즐겨찾기 goal 목록("pom경로\tgoal" 형태). 추가한 순서를 유지한다. */
-	private final java.util.Set<String> favorites = new java.util.LinkedHashSet<>();
-	/** 최근 실행한 goal 목록. 맨 앞이 가장 최근이다. */
-	private final java.util.LinkedList<String> recents = new java.util.LinkedList<>();
+	/** 즐겨찾기와 최근 실행 목록. */
+	private final GoalHistory history = new GoalHistory();
 	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
 	private IMemento savedState;
 	private Text filterBox;
@@ -136,17 +137,23 @@ public final class MavenGoalsView extends ViewPart
 	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
 	/**
-	 * 다른 파트(예: Project Explorer)에서 마지막으로 선택된 리소스. 포커스가 이 뷰의 툴바/트리로 넘어간 뒤에도
-	 * "Add from Selection"이 동작하도록 따로 보관해 둔다.
+	 * 다른 파트(예: Project/Package Explorer)에서 마지막으로 선택된 항목들이 속한 프로젝트. 포커스가 이 뷰의 툴바/트리로 넘어간 뒤에도
+	 * "Add from Selection"이 동작하도록 따로 보관해 둔다. 프로젝트로 변환되지 않는 선택(예: 콘솔)은 무시해 기존 값을 유지한다.
 	 */
-	private IResource lastExternalSelection;
+	private List<IProject> lastExternalProjects = List.of();
 	private final ISelectionListener externalSelectionTracker = (IWorkbenchPart part, ISelection selection) -> {
-		if (part == this)
+		if (part == this || !(selection instanceof IStructuredSelection ss))
 			return;
-		if (selection instanceof IStructuredSelection ss && ss.getFirstElement() instanceof IResource r)
+		java.util.Set<IProject> found = new java.util.LinkedHashSet<>();
+		for (Object o : ss.toArray())
 		{
-			lastExternalSelection = r;
+			// Package Explorer는 IResource가 아닌 IJavaProject 등을 주므로 어댑터로 변환한다.
+			IResource r = o instanceof IResource res ? res : Adapters.adapt(o, IResource.class);
+			if (r != null && r.getProject() != null)
+				found.add(r.getProject());
 		}
+		if (!found.isEmpty())
+			lastExternalProjects = new ArrayList<>(found);
 	};
 
 	/** 이전 세션에서 저장한 뷰 상태(펼침 노드, 검색어)를 보관해 둔다. */
@@ -370,6 +377,7 @@ public final class MavenGoalsView extends ViewPart
 		loadGoalLists();
 		hookContextMenu();
 		loadRegisteredPoms();
+		pruneMissingPoms();
 		restoreState();
 	}
 
@@ -570,7 +578,8 @@ public final class MavenGoalsView extends ViewPart
 			}
 		};
 		addFromSelection.setToolTipText(Messages.get("action.addSelection.tooltip"));
-		addFromSelection.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_ETOOL_HOME_NAV));
+		addFromSelection.setImageDescriptor(
+			AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/add_project.png"));
 
 		Action remove = new Action(Messages.get("action.remove"))
 		{
@@ -769,34 +778,23 @@ public final class MavenGoalsView extends ViewPart
 	/** 즐겨찾기/최근 실행 항목 문자열("pom경로\tgoal")을 만든다. */
 	private static String entry(File pom, MavenGoal g)
 	{
-		return key(pom) + ENTRY_SEP + MavenExecutor.goalString(g);
-	}
-
-	/** 항목 문자열에서 pom 경로를 꺼낸다. */
-	private static String entryPom(String entry)
-	{
-		return entry.substring(0, entry.indexOf(ENTRY_SEP));
-	}
-
-	/** 항목 문자열에서 goal 문자열을 꺼낸다. */
-	private static String entryGoal(String entry)
-	{
-		return entry.substring(entry.indexOf(ENTRY_SEP) + ENTRY_SEP.length());
+		return GoalHistory.entry(key(pom), MavenExecutor.goalString(g));
 	}
 
 	/** 메뉴에 표시할 라벨("프로젝트 : goal")을 만든다. */
 	private String entryLabel(String entry)
 	{
-		MavenGoal project = projects.get(entryPom(entry));
-		String name = project != null ? project.getName() : new File(entryPom(entry)).getParentFile().getName();
-		return name + " : " + GoalLabels.shorten(entryGoal(entry));
+		String pomPath = GoalHistory.pomOf(entry);
+		MavenGoal project = projects.get(pomPath);
+		String name = project != null ? project.getName() : new File(pomPath).getParentFile().getName();
+		return name + " : " + GoalLabels.shorten(GoalHistory.goalOf(entry));
 	}
 
 	/** 노드가 즐겨찾기에 등록돼 있는지 확인한다. */
 	private boolean isFavorite(MavenGoal g)
 	{
 		File pom = g.resolvePomFile();
-		return g.getGoal() != null && pom != null && favorites.contains(entry(pom, g));
+		return g.getGoal() != null && pom != null && history.isFavorite(entry(pom, g));
 	}
 
 	/** 즐겨찾기 등록/해제를 토글하고 저장한다. */
@@ -805,62 +803,85 @@ public final class MavenGoalsView extends ViewPart
 		File pom = g.resolvePomFile();
 		if (pom == null || g.getGoal() == null)
 			return;
-		String e = entry(pom, g);
-		if (!favorites.remove(e))
-			favorites.add(e);
-		saveGoalList(PREF_FAVORITES, favorites);
+		history.toggleFavorite(entry(pom, g));
+		saveGoalLists();
 		viewer.refresh();
 		updateFavoritesIcon();
 	}
 
-	/** 최근 실행 목록 맨 앞에 추가하고(중복 제거, 최대 개수 유지) 저장한다. */
+	/** 최근 실행 목록 맨 앞에 추가하고(중복 제거, 최대 10개 유지) 저장한다. */
 	private void addRecent(String entry)
 	{
-		recents.remove(entry);
-		recents.addFirst(entry);
-		while (recents.size() > MAX_RECENT)
-			recents.removeLast();
-		saveGoalList(PREF_RECENT, recents);
+		history.addRecent(entry);
+		saveGoalLists();
 	}
 
-	/** 즐겨찾기/최근 실행 목록을 preference에서 읽는다. */
+	/** 즐겨찾기/최근 실행 목록을 preference에서 읽는다(최근 실행은 최대 개수까지만). */
 	private void loadGoalLists()
 	{
 		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		for (String e : prefs.get(PREF_FAVORITES, "").split(PATH_SEP))
-			if (e.contains(ENTRY_SEP))
-				favorites.add(e);
-		for (String e : prefs.get(PREF_RECENT, "").split(PATH_SEP))
-			if (e.contains(ENTRY_SEP))
-				recents.add(e);
+		history.load(prefs.get(PREF_FAVORITES, ""), prefs.get(PREF_RECENT, ""));
 	}
 
-	/** 항목 목록을 preference에 저장한다. */
-	private void saveGoalList(String prefKey, java.util.Collection<String> entries)
+	/** 즐겨찾기/최근 실행 목록을 preference에 저장한다. */
+	private void saveGoalLists()
 	{
 		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		prefs.put(prefKey, String.join(PATH_SEP, entries));
+		prefs.put(PREF_FAVORITES, history.serializeFavorites());
+		prefs.put(PREF_RECENT, history.serializeRecents());
 		try
 		{
 			prefs.flush();
 		}
 		catch (Exception ex)
 		{
-			log(IStatus.WARNING, "Failed to persist " + prefKey, ex);
+			log(IStatus.WARNING, "Failed to persist favorites/recent goals", ex);
+		}
+	}
+
+	/**
+	 * 삭제된 pom.xml을 정리한다. 파일이 없어진 등록 프로젝트는 트리와 등록 목록에서 빼고, 그 pom의 즐겨찾기와 최근 실행 항목도 함께 지운다.
+	 * 뷰가 활성화될 때, 새로고침할 때, 실행 목록을 열 때 호출한다.
+	 */
+	private void pruneMissingPoms()
+	{
+		boolean projectsChanged = false;
+		for (String path : new ArrayList<>(projects.keySet()))
+		{
+			if (!new File(path).isFile())
+			{
+				MavenGoal old = projects.remove(path);
+				if (old != null)
+					MavenPomParser.dispose(old);
+				projectsChanged = true;
+			}
+		}
+		boolean historyChanged = history.prune(path -> new File(path).isFile());
+		if (projectsChanged)
+		{
+			visibleNodes = null;
+			persistRegisteredPoms();
+		}
+		if (historyChanged)
+			saveGoalLists();
+		if (projectsChanged || historyChanged)
+		{
+			viewer.refresh();
+			updateFavoritesIcon();
 		}
 	}
 
 	/** 항목을 현재 실행 방식(외부 mvn/내장)으로 실행하고 최근 목록에 올린다. */
 	private void runEntry(String entry)
 	{
-		File pom = new File(entryPom(entry));
+		File pom = new File(GoalHistory.pomOf(entry));
 		if (!pom.isFile())
 		{
-			log(IStatus.WARNING, "pom.xml no longer exists: " + pom, null);
+			pruneMissingPoms();
 			return;
 		}
 		addRecent(entry);
-		MavenExecutor.run(pom, entryGoal(entry), useExternalMvn);
+		MavenExecutor.run(pom, GoalHistory.goalOf(entry), useExternalMvn);
 	}
 
 	/** 대화상자로 goal과 옵션을 정해 실행한다. PROJECT 노드는 기본 goal로 "clean install"을 제안한다. 사용한 옵션은 다음 실행을 위해 저장한다. */
@@ -897,7 +918,7 @@ public final class MavenGoalsView extends ViewPart
 		String commandLine = dialog.getCommandLine();
 		if (commandLine.isEmpty())
 			return;
-		addRecent(key(pom) + ENTRY_SEP + commandLine);
+		addRecent(GoalHistory.entry(key(pom), commandLine));
 		MavenExecutor.run(pom, commandLine, useExternalMvn);
 	}
 
@@ -1014,7 +1035,8 @@ public final class MavenGoalsView extends ViewPart
 	/** 드롭다운 메뉴 내용을 채운다: 즐겨찾기, 구분선, 최근 실행, 최근 목록 지우기. */
 	private void fillGoalMenu(MenuManager manager)
 	{
-		if (favorites.isEmpty() && recents.isEmpty())
+		pruneMissingPoms();
+		if (history.favorites().isEmpty() && history.recents().isEmpty())
 		{
 			Action empty = new Action(Messages.get("favorites.empty"))
 			{
@@ -1023,7 +1045,7 @@ public final class MavenGoalsView extends ViewPart
 			manager.add(empty);
 			return;
 		}
-		for (String e : favorites)
+		for (String e : history.favorites())
 		{
 			manager.add(new Action("\u2605 " + entryLabel(e))
 			{
@@ -1034,9 +1056,9 @@ public final class MavenGoalsView extends ViewPart
 				}
 			});
 		}
-		if (!favorites.isEmpty() && !recents.isEmpty())
+		if (!history.favorites().isEmpty() && !history.recents().isEmpty())
 			manager.add(new Separator());
-		for (String e : recents)
+		for (String e : history.recents())
 		{
 			manager.add(new Action(entryLabel(e))
 			{
@@ -1047,7 +1069,7 @@ public final class MavenGoalsView extends ViewPart
 				}
 			});
 		}
-		if (!recents.isEmpty())
+		if (!history.recents().isEmpty())
 		{
 			manager.add(new Separator());
 			manager.add(new Action(Messages.get("favorites.clearRecent"))
@@ -1055,8 +1077,8 @@ public final class MavenGoalsView extends ViewPart
 				@Override
 				public void run()
 				{
-					recents.clear();
-					saveGoalList(PREF_RECENT, recents);
+					history.clearRecents();
+					saveGoalLists();
 				}
 			});
 		}
@@ -1098,22 +1120,113 @@ public final class MavenGoalsView extends ViewPart
 		persistRegisteredPoms();
 	}
 
-	/** externalSelectionTracker가 캐시해 둔, 다른 뷰에서 마지막으로 선택된 리소스의 pom.xml을 등록한다. */
+	/**
+	 * 선택한 프로젝트(복수 가능)에서 pom.xml을 자동으로 찾아 등록한다. 선택이 없으면 프로젝트를 고르게 한다. 후보가 하나면 바로 등록하고,
+	 * 여러 개면 체크 목록에서 고르게 한다. 이미 등록된 pom은 후보에서 뺀다.
+	 */
 	private void addPomFromSelection()
 	{
-		IResource r = lastExternalSelection;
-		IProject project = r == null ? null : (r instanceof IProject p ? p : r.getProject());
-		if (project != null)
+		Shell shell = viewer.getControl().getShell();
+		List<IProject> targets = new ArrayList<>();
+		for (IProject p : lastExternalProjects)
 		{
-			IFile file = project.getFile("pom.xml");
-			if (file.exists())
-			{
-				addPom(file.getLocation().toFile());
-				persistRegisteredPoms();
+			if (p.exists() && p.getLocation() != null)
+				targets.add(p);
+		}
+		if (targets.isEmpty())
+		{
+			targets = chooseWorkspaceProjects(shell);
+			if (targets.isEmpty())
 				return;
+		}
+
+		Map<File, String> candidates = new LinkedHashMap<>();
+		int alreadyRegistered = 0;
+		for (IProject p : targets)
+		{
+			File dir = p.getLocation().toFile();
+			for (File pom : PomScanner.find(dir))
+			{
+				if (projects.containsKey(key(pom)))
+					alreadyRegistered++;
+				else
+					candidates.put(pom, p.getName() + "  \u2014  " + dir.toPath().relativize(pom.toPath()));
 			}
 		}
-		log(IStatus.WARNING, "No pom.xml found for the last selected project/resource", null);
+		String title = Messages.get("scan.title");
+		if (candidates.isEmpty())
+		{
+			MessageDialog.openInformation(
+				shell,
+				title,
+				Messages.get(alreadyRegistered > 0 ? "scan.allRegistered" : "scan.none"));
+			return;
+		}
+
+		List<File> chosen = new ArrayList<>(candidates.keySet());
+		if (candidates.size() > 1)
+		{
+			ListSelectionDialog dialog = new ListSelectionDialog(
+				shell,
+				chosen,
+				ArrayContentProvider.getInstance(),
+				new LabelProvider()
+				{
+					@Override
+					public String getText(Object element)
+					{
+						return candidates.get(element);
+					}
+				},
+				Messages.get("scan.message"));
+			dialog.setTitle(title);
+			dialog.setInitialElementSelections(chosen);
+			if (dialog.open() != Window.OK)
+				return;
+			chosen = new ArrayList<>();
+			for (Object o : dialog.getResult())
+				chosen.add((File) o);
+		}
+		for (File pom : chosen)
+			addPom(pom);
+		if (!chosen.isEmpty())
+			persistRegisteredPoms();
+	}
+
+	/** 선택된 프로젝트가 없을 때, 루트에 pom.xml이 있는 열린 워크스페이스 프로젝트를 체크 목록으로 보여주고 고르게 한다. */
+	private List<IProject> chooseWorkspaceProjects(Shell shell)
+	{
+		List<IProject> mavenProjects = new ArrayList<>();
+		for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects())
+		{
+			if (p.isOpen() && p.getLocation() != null && new File(p.getLocation().toFile(), "pom.xml").isFile())
+				mavenProjects.add(p);
+		}
+		if (mavenProjects.isEmpty())
+		{
+			MessageDialog.openInformation(shell, Messages.get("scan.title"), Messages.get("scan.none"));
+			return List.of();
+		}
+		ListSelectionDialog dialog = new ListSelectionDialog(
+			shell,
+			mavenProjects,
+			ArrayContentProvider.getInstance(),
+			new LabelProvider()
+			{
+				@Override
+				public String getText(Object element)
+				{
+					return ((IProject) element).getName();
+				}
+			},
+			Messages.get("scan.chooseProjects"));
+		dialog.setTitle(Messages.get("scan.title"));
+		if (dialog.open() != Window.OK)
+			return List.of();
+		List<IProject> chosen = new ArrayList<>();
+		for (Object o : dialog.getResult())
+			chosen.add((IProject) o);
+		return chosen;
 	}
 
 	/**
@@ -1150,6 +1263,7 @@ public final class MavenGoalsView extends ViewPart
 	 */
 	public void refreshAll()
 	{
+		pruneMissingPoms();
 		for (String path : new java.util.ArrayList<>(projects.keySet()))
 		{
 			reparse(new File(path));
@@ -1236,6 +1350,7 @@ public final class MavenGoalsView extends ViewPart
 	@Override
 	public void setFocus()
 	{
+		pruneMissingPoms();
 		viewer.getControl().setFocus();
 	}
 
