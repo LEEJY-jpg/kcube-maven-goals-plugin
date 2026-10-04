@@ -6,11 +6,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.ResourcesPlugin;
-import org.eclipse.core.runtime.Adapters;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
@@ -29,7 +26,6 @@ import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.AbstractTreeViewer;
 import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.IFontProvider;
-import org.eclipse.jface.viewers.ISelection;
 import org.eclipse.jface.viewers.ITreeViewerListener;
 import org.eclipse.jface.viewers.TreeExpansionEvent;
 import org.eclipse.jface.viewers.IStructuredSelection;
@@ -40,12 +36,6 @@ import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.jface.viewers.ViewerFilter;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.dnd.DND;
-import org.eclipse.swt.dnd.DropTarget;
-import org.eclipse.swt.dnd.DropTargetAdapter;
-import org.eclipse.swt.dnd.DropTargetEvent;
-import org.eclipse.swt.dnd.FileTransfer;
-import org.eclipse.swt.dnd.Transfer;
 import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.layout.GridData;
@@ -58,14 +48,11 @@ import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IMemento;
-import org.eclipse.ui.ISelectionListener;
 import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IViewSite;
-import org.eclipse.ui.IWorkbenchPart;
 import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.dialogs.ListSelectionDialog;
-import org.eclipse.ui.part.ResourceTransfer;
 import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 
@@ -76,6 +63,7 @@ import com.kcube.mavenview.services.GoalHistory;
 import com.kcube.mavenview.services.GoalLabels;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
+import com.kcube.mavenview.services.PomRegistryStore;
 import com.kcube.mavenview.services.PomWatcher;
 import com.kcube.mavenview.services.PomScanner;
 import com.kcube.mavenview.services.RunOptions;
@@ -91,7 +79,6 @@ public final class MavenGoalsView extends ViewPart
 {
 	public static final String ID = "com.kcube.mavenview.views.mavenGoals";
 	private static final String PREFS_NODE = "com.kcube.mavenview";
-	private static final String PREF_POMS = "registeredPoms";
 	private static final String PREF_USE_EXTERNAL_MVN = "useExternalMvn";
 	private static final String PREF_FAVORITES = "favoriteGoals";
 	private static final String PREF_RECENT = "recentGoals";
@@ -144,25 +131,8 @@ public final class MavenGoalsView extends ViewPart
 	private Action favoritesAction;
 	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
-	/**
-	 * 다른 파트(예: Project/Package Explorer)에서 마지막으로 선택된 항목들이 속한 프로젝트. 포커스가 이 뷰의 툴바/트리로 넘어간 뒤에도
-	 * "Add from Selection"이 동작하도록 따로 보관해 둔다. 프로젝트로 변환되지 않는 선택(예: 콘솔)은 무시해 기존 값을 유지한다.
-	 */
-	private List<IProject> lastExternalProjects = List.of();
-	private final ISelectionListener externalSelectionTracker = (IWorkbenchPart part, ISelection selection) -> {
-		if (part == this || !(selection instanceof IStructuredSelection ss))
-			return;
-		java.util.Set<IProject> found = new java.util.LinkedHashSet<>();
-		for (Object o : ss.toArray())
-		{
-			// Package Explorer는 IResource가 아닌 IJavaProject 등을 주므로 어댑터로 변환한다.
-			IResource r = o instanceof IResource res ? res : Adapters.adapt(o, IResource.class);
-			if (r != null && r.getProject() != null)
-				found.add(r.getProject());
-		}
-		if (!found.isEmpty())
-			lastExternalProjects = new ArrayList<>(found);
-	};
+	/** "Add from Selection"용으로 다른 파트의 선택을 추적한다. */
+	private final SelectionTracker selectionTracker = new SelectionTracker(this);
 
 	/** 이전 세션에서 저장한 뷰 상태(펼침 노드, 검색어)를 보관해 둔다. */
 	@Override
@@ -380,7 +350,7 @@ public final class MavenGoalsView extends ViewPart
 		createActions();
 		getSite().setSelectionProvider(viewer);
 		viewer.addSelectionChangedListener(e -> updateFavoritesIcon());
-		getSite().getWorkbenchWindow().getSelectionService().addSelectionListener(externalSelectionTracker);
+		getSite().getWorkbenchWindow().getSelectionService().addSelectionListener(selectionTracker);
 
 		loadGoalLists();
 		hookContextMenu();
@@ -463,7 +433,7 @@ public final class MavenGoalsView extends ViewPart
 	@Override
 	public void dispose()
 	{
-		getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(externalSelectionTracker);
+		getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(selectionTracker);
 		if (pomWatchTask != null && viewer != null && !viewer.getControl().isDisposed())
 			viewer.getControl().getDisplay().timerExec(-1, pomWatchTask);
 		if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
@@ -543,63 +513,10 @@ public final class MavenGoalsView extends ViewPart
 	/** Finder/Project Explorer 등에서 pom.xml 또는 프로젝트 폴더를 뷰로 끌어다 놓으면 자동 등록한다. */
 	private void hookDragAndDrop()
 	{
-		DropTarget target = new DropTarget(viewer.getControl(), DND.DROP_COPY | DND.DROP_DEFAULT);
-		target.setTransfer(new Transfer[] {FileTransfer.getInstance(), ResourceTransfer.getInstance()});
-		target.addDropListener(new DropTargetAdapter()
-		{
-			/** 드래그 중인 항목이 들어올 때 기본 동작을 복사(COPY)로 지정한다. */
-			@Override
-			public void dragEnter(DropTargetEvent event)
-			{
-				if (event.detail == DND.DROP_DEFAULT)
-					event.detail = DND.DROP_COPY;
-			}
-
-			/** 드롭된 파일/리소스에서 pom.xml을 찾아 등록하고, 등록이 있었으면 목록을 저장한다. */
-			@Override
-			public void drop(DropTargetEvent event)
-			{
-				boolean changed = false;
-				if (FileTransfer.getInstance().isSupportedType(event.currentDataType))
-				{
-					// Finder 등 OS 파일 매니저에서 드롭: 파일 경로 문자열 배열로 전달됨.
-					for (String path : (String[]) event.data)
-					{
-						changed |= addPomOrProjectPath(new File(path));
-					}
-				}
-				else if (ResourceTransfer.getInstance().isSupportedType(event.currentDataType))
-				{
-					// Project/Package Explorer에서 드롭: 워크스페이스 IResource로 전달됨.
-					for (IResource resource : (IResource[]) event.data)
-					{
-						IFile pomFile = resource instanceof IFile f && f.getName().equals("pom.xml")
-							? f
-							: resource.getProject().getFile("pom.xml");
-						if (pomFile.exists())
-						{
-							addPom(pomFile.getLocation().toFile());
-							changed = true;
-						}
-					}
-				}
-				if (changed)
-					persistRegisteredPoms();
-			}
-		});
-	}
-
-	/** 드롭된 경로가 pom.xml이면 그대로, 프로젝트 폴더면 그 안의 pom.xml을 등록한다. */
-	private boolean addPomOrProjectPath(File dropped)
-	{
-		File pomFile = dropped.isDirectory() ? new File(dropped, "pom.xml") : dropped;
-		if (!"pom.xml".equals(pomFile.getName()) || !pomFile.isFile())
-		{
-			log(IStatus.WARNING, "Not a pom.xml, ignored: " + dropped, null);
-			return false;
-		}
-		addPom(pomFile);
-		return true;
+		PomDropSupport.install(viewer.getControl(), pomFile -> {
+			addPom(pomFile);
+			return true;
+		}, this::persistRegisteredPoms, (msg) -> log(IStatus.WARNING, msg, null));
 	}
 
 	/**
@@ -1223,7 +1140,7 @@ public final class MavenGoalsView extends ViewPart
 	{
 		Shell shell = viewer.getControl().getShell();
 		List<IProject> targets = new ArrayList<>();
-		for (IProject p : lastExternalProjects)
+		for (IProject p : selectionTracker.lastProjects())
 		{
 			if (p.exists() && p.getLocation() != null)
 				targets.add(p);
@@ -1399,11 +1316,9 @@ public final class MavenGoalsView extends ViewPart
 	/** 현재 등록된 pom.xml 경로 목록을 workspace preference에 저장한다. */
 	private void persistRegisteredPoms()
 	{
-		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		prefs.put(PREF_POMS, String.join(PATH_SEP, projects.keySet()));
 		try
 		{
-			prefs.flush();
+			PomRegistryStore.save(projects.keySet());
 		}
 		catch (Exception e)
 		{
@@ -1414,14 +1329,8 @@ public final class MavenGoalsView extends ViewPart
 	/** 뷰가 열릴 때 preference에 저장돼 있던 pom.xml 목록을 읽어 다시 등록한다(파일이 사라졌으면 경고만 남김). */
 	private void loadRegisteredPoms()
 	{
-		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		String stored = prefs.get(PREF_POMS, "");
-		if (stored.isBlank())
-			return;
-		for (String path : stored.split(PATH_SEP))
+		for (String path : PomRegistryStore.load())
 		{
-			if (path.isBlank())
-				continue;
 			File pomFile = new File(path);
 			if (pomFile.isFile())
 				reparse(pomFile);
