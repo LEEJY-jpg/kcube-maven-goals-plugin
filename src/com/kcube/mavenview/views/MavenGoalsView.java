@@ -543,6 +543,19 @@ public final class MavenGoalsView extends ViewPart
 		run.setToolTipText(Messages.get("action.run.tooltip"));
 		run.setImageDescriptor(AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/run.png"));
 
+		// 실행 중인 외부 mvn 빌드를 모두 중단한다(내장 Maven은 Eclipse 콘솔의 Terminate 버튼 사용).
+		Action stop = new Action(Messages.get("action.stop"))
+		{
+			/** 실행 중인 외부 mvn 프로세스를 중단한다. */
+			@Override
+			public void run()
+			{
+				MavenExecutor.stopAll();
+			}
+		};
+		stop.setToolTipText(Messages.get("action.stop.tooltip"));
+		stop.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_ELCL_STOP));
+
 		Action updateProject = new Action(Messages.get("action.update"))
 		{
 			/** 선택된 프로젝트에 대해 Update Maven Project를 수행한다. */
@@ -677,6 +690,7 @@ public final class MavenGoalsView extends ViewPart
 		toolbar.add(useExternalCheckbox);
 		toolbar.add(new Separator());
 		toolbar.add(run);
+		toolbar.add(stop);
 		toolbar.add(createFavoritesAction());
 		toolbar.add(updateProject);
 		toolbar.add(new Separator());

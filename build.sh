@@ -27,6 +27,8 @@ JAVAC="${JAVA_HOME:+$JAVA_HOME/bin/}javac"; JAR="${JAVA_HOME:+$JAVA_HOME/bin/}ja
 
 VERSION="$(sed -n 's/^Bundle-Version: *//p' META-INF/MANIFEST.MF | tr -d "\r" | sed "s/\.qualifier$//")"
 OUT="dist/com.kcube.mavenview_${VERSION}.jar"
+# 같은 1.0.0 이어도 빌드마다 qualifier(타임스탬프)를 붙여, Eclipse 가 옛 번들과 새 번들을 구분하게 한다.
+QUALIFIER="${QUALIFIER:-$(date +%Y%m%d%H%M)}"
 BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
@@ -45,10 +47,17 @@ echo "compile (--release 17) ..."
 cp -R icons "$BUILD/icons"; cp plugin.xml plugin*.properties "$BUILD/"
 (cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
 mkdir -p dist
-"$JAR" --create --file "$OUT" --manifest META-INF/MANIFEST.MF -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties -C "$BUILD" plugin_ja.properties -C "$BUILD" plugin_zh.properties
-echo "built: $OUT"
+sed "s/^\(Bundle-Version: .*\)\.qualifier\(\r\)\{0,1\}$/\1.${QUALIFIER}\2/" META-INF/MANIFEST.MF > "$BUILD/MANIFEST.MF"
+"$JAR" --create --file "$OUT" --manifest "$BUILD/MANIFEST.MF" -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties -C "$BUILD" plugin_ja.properties -C "$BUILD" plugin_zh.properties
+echo "built: $OUT (Bundle-Version ${VERSION}.${QUALIFIER})"
 
 if [ "${1:-}" = "--install" ]; then
+	# dropins 에 옛 버전이 남아 있으면 Eclipse 가 그쪽을 로드해 새 빌드가 무시되므로, 기존 설치본을 모두 치운다.
+	for old in "$ECLIPSE_HOME"/dropins/com.kcube.mavenview*; do
+		[ -e "$old" ] || continue
+		echo "removing old install: $old"
+		rm -rf "$old"
+	done
 	command cp -f "$OUT" "$ECLIPSE_HOME/dropins/"
 	echo "installed to $ECLIPSE_HOME/dropins (Eclipse 를 -clean 으로 재시작하세요)"
 fi

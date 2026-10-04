@@ -6,6 +6,11 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
@@ -18,6 +23,7 @@ import org.eclipse.debug.core.ILaunchManager;
 import org.eclipse.m2e.actions.MavenLaunchConstants;
 import org.eclipse.ui.console.ConsolePlugin;
 import org.eclipse.ui.console.IConsole;
+import org.eclipse.ui.console.IConsoleManager;
 import org.eclipse.ui.console.MessageConsole;
 import org.eclipse.ui.console.MessageConsoleStream;
 
@@ -86,23 +92,69 @@ public final class MavenExecutor
 		}
 	}
 
-	// PATH의 외부 `mvn`(또는 설정된 "maven.executable" preference)을 셸로 호출해 실행한다.
+	/** 실행 중인 외부 mvn 프로세스. 키는 "pom경로\tgoal"이며 같은 실행의 중복 시작을 막고 Stop에 쓰인다. */
+	private static final Map<String, Process> RUNNING = new ConcurrentHashMap<>();
+
+	private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+	/** 실행 중인 외부 mvn이 있는지 여부. */
+	public static boolean hasRunning()
+	{
+		return !RUNNING.isEmpty();
+	}
+
+	/** 실행 중인 외부 mvn 프로세스(자식 포함)를 모두 중단한다. 중단한 개수를 돌려준다. */
+	public static int stopAll()
+	{
+		int count = 0;
+		for (Process p : RUNNING.values())
+		{
+			p.descendants().forEach(ProcessHandle::destroy);
+			p.destroy();
+			count++;
+		}
+		return count;
+	}
+
+	/**
+	 * pom 위치에서 부모 디렉터리로 거슬러 올라가며 Maven Wrapper(mvnw / Windows는 mvnw.cmd)를 찾는다. 멀티 모듈에서는 wrapper가 루트에만 있으므로
+	 * 상위까지 탐색한다. 없으면 null.
+	 */
+	static File findWrapper(File pomDir)
+	{
+		String name = WINDOWS ? "mvnw.cmd" : "mvnw";
+		for (File dir = pomDir; dir != null; dir = dir.getParentFile())
+		{
+			File candidate = new File(dir, name);
+			if (candidate.isFile() && (WINDOWS || candidate.canExecute()))
+				return candidate;
+		}
+		return null;
+	}
+
+	// 외부 Maven(프로젝트의 mvnw 우선, 없으면 preference/PATH의 mvn)을 호출해 실행한다.
 	private static void runExternal(File pom, String goalString)
 	{
-		// 실행마다 새 콘솔을 만들어 보여준다 (Eclipse 콘솔 뷰에 결과가 그대로 출력됨).
-		ConsolePlugin plugin = ConsolePlugin.getDefault();
-		MessageConsole console = new MessageConsole("Maven - " + goalString, null);
-		plugin.getConsoleManager().addConsoles(new IConsole[] {console});
-		plugin.getConsoleManager().showConsoleView(console);
+		String runKey = pom.getAbsolutePath() + "\t" + goalString;
+		// 실행마다 콘솔을 보여준다. 같은 이름의 콘솔이 있으면 비우고 재사용해 콘솔이 무한정 늘지 않게 한다.
+		MessageConsole console = consoleFor("Maven - " + goalString);
+		ConsolePlugin.getDefault().getConsoleManager().showConsoleView(console);
+		if (RUNNING.containsKey(runKey))
+		{
+			console.newMessageStream().println(Messages.get("console.already.running"));
+			return;
+		}
+		console.clearConsole();
 
 		// mvn 프로세스는 오래 걸릴 수 있으므로 UI 스레드를 막지 않도록 별도 스레드에서 실행.
 		Thread worker = new Thread(() -> {
-			try
+			try (MessageConsoleStream out = console.newMessageStream())
 			{
 				String loginShellPath = loginShellPath();
 
 				List<String> command = new ArrayList<>();
-				command.add(findMaven(loginShellPath));
+				File wrapper = findWrapper(pom.getParentFile());
+				command.add(wrapper != null ? wrapper.getAbsolutePath() : findMaven(loginShellPath));
 				command.add("-f");
 				command.add(pom.getAbsolutePath());
 				// goalString은 "clean install -DskipTests"처럼 옵션이 섞인 명령행일 수 있어 인자별로 나눠 전달한다.
@@ -116,27 +168,52 @@ public final class MavenExecutor
 					pb.environment().put("PATH", loginShellPath);
 				}
 				Process process = pb.start();
-
-				// 프로세스 출력을 한 줄씩 그대로 콘솔에 중계한다.
-				try (
-					BufferedReader r = new BufferedReader(
-						new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-					MessageConsoleStream out = console.newMessageStream())
+				RUNNING.put(runKey, process);
+				try
 				{
-					String line;
-					while ((line = r.readLine()) != null)
-						out.println(line);
+					// 프로세스 출력을 한 줄씩 그대로 콘솔에 중계한다.
+					try (BufferedReader r = new BufferedReader(
+						new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8)))
+					{
+						String line;
+						while ((line = r.readLine()) != null)
+							out.println(line);
+					}
+					int exit = process.waitFor();
+					out.println(Messages.get("console.finished", exit));
 				}
-				int exit = process.waitFor();
-				console.newMessageStream().println(Messages.get("console.finished", exit));
+				finally
+				{
+					RUNNING.remove(runKey);
+				}
 			}
 			catch (Exception e)
 			{
-				console.newMessageStream().println(Messages.get("console.error", e.getMessage()));
+				try (MessageConsoleStream err = console.newMessageStream())
+				{
+					err.println(Messages.get("console.error", e.getMessage()));
+				}
+				catch (Exception ignored)
+				{
+				}
 			}
 		}, "kcube-maven-exec");
 		worker.setDaemon(true);
 		worker.start();
+	}
+
+	/** 이름이 같은 기존 콘솔을 찾아 돌려주고, 없으면 새로 만들어 등록한다. */
+	private static MessageConsole consoleFor(String name)
+	{
+		IConsoleManager manager = ConsolePlugin.getDefault().getConsoleManager();
+		for (IConsole existing : manager.getConsoles())
+		{
+			if (existing instanceof MessageConsole mc && name.equals(mc.getName()))
+				return mc;
+		}
+		MessageConsole console = new MessageConsole(name, null);
+		manager.addConsoles(new IConsole[] {console});
+		return console;
 	}
 
 	// GUI로 띄운 앱의 PATH에는 항상 들어 있지는 않은 mvn의 일반적인 설치 위치들.
@@ -164,7 +241,7 @@ public final class MavenExecutor
 		{
 			for (String dir : loginShellPath.split(File.pathSeparator))
 			{
-				File candidate = new File(dir, "mvn");
+				File candidate = new File(dir, WINDOWS ? "mvn.cmd" : "mvn");
 				if (candidate.isFile() && candidate.canExecute())
 					return candidate.getAbsolutePath();
 			}
@@ -183,6 +260,8 @@ public final class MavenExecutor
 		return "mvn";
 	}
 
+	private static final int LOGIN_SHELL_TIMEOUT_SECONDS = 5;
+
 	private static volatile String cachedLoginShellPath;
 
 	/**
@@ -194,13 +273,28 @@ public final class MavenExecutor
 	{
 		if (cachedLoginShellPath != null)
 			return cachedLoginShellPath;
+		if (WINDOWS)
+			return null; // Windows는 GUI 앱도 시스템 PATH를 그대로 상속받는다.
 		String marker = "__KCUBE_PATH__:";
+		Process p = null;
 		try
 		{
 			String shell = System.getenv().getOrDefault("SHELL", "/bin/zsh");
-			Process p = new ProcessBuilder(shell, "-ilc", "echo " + marker + "$PATH").redirectErrorStream(true).start();
-			String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-			p.waitFor();
+			p = new ProcessBuilder(shell, "-ilc", "echo " + marker + "$PATH").redirectErrorStream(true).start();
+			final Process proc = p;
+			// 셸 초기화 파일이 입력을 기다리며 멈출 수 있으므로 시간 제한을 둔다.
+			String out = new String(
+				CompletableFuture.supplyAsync(() -> {
+					try
+					{
+						return proc.getInputStream().readAllBytes();
+					}
+					catch (java.io.IOException e)
+					{
+						throw new java.io.UncheckedIOException(e);
+					}
+				}).get(LOGIN_SHELL_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+				StandardCharsets.UTF_8);
 			int idx = out.lastIndexOf(marker);
 			if (idx >= 0)
 			{
@@ -209,8 +303,18 @@ public final class MavenExecutor
 				cachedLoginShellPath = (nl >= 0 ? rest.substring(0, nl) : rest).trim();
 			}
 		}
-		catch (Exception ignored)
+		catch (TimeoutException e)
 		{
+			log(IStatus.WARNING, "Login shell did not report PATH within " + LOGIN_SHELL_TIMEOUT_SECONDS + "s", null);
+		}
+		catch (Exception e)
+		{
+			log(IStatus.WARNING, "Failed to read PATH from login shell", e);
+		}
+		finally
+		{
+			if (p != null)
+				p.destroyForcibly();
 		}
 		return cachedLoginShellPath;
 	}
