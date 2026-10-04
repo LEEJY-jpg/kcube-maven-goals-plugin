@@ -6,25 +6,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.eclipse.core.resources.IProject;
-import org.eclipse.core.resources.ResourcesPlugin;
-import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IStatus;
-import org.eclipse.core.runtime.Status;
-import org.eclipse.core.runtime.jobs.Job;
-import org.eclipse.core.runtime.preferences.IEclipsePreferences;
-import org.eclipse.core.runtime.preferences.InstanceScope;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.IAction;
 import org.eclipse.jface.action.IMenuCreator;
 import org.eclipse.jface.action.MenuManager;
-import org.eclipse.jface.action.ControlContribution;
-import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.resource.JFaceResources;
-import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.AbstractTreeViewer;
-import org.eclipse.jface.viewers.ArrayContentProvider;
 import org.eclipse.jface.viewers.IFontProvider;
 import org.eclipse.jface.viewers.ITreeViewerListener;
 import org.eclipse.jface.viewers.TreeExpansionEvent;
@@ -36,23 +25,16 @@ import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.jface.viewers.ViewerFilter;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
-import org.eclipse.swt.events.SelectionListener;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
-import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
-import org.eclipse.swt.widgets.FileDialog;
 import org.eclipse.swt.widgets.Menu;
-import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IMemento;
-import org.eclipse.ui.ISharedImages;
 import org.eclipse.ui.IViewSite;
 import org.eclipse.ui.PartInitException;
-import org.eclipse.ui.PlatformUI;
-import org.eclipse.ui.dialogs.ListSelectionDialog;
 import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 
@@ -63,9 +45,10 @@ import com.kcube.mavenview.services.GoalHistory;
 import com.kcube.mavenview.services.GoalLabels;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
+import com.kcube.mavenview.services.PluginLog;
 import com.kcube.mavenview.services.PomRegistryStore;
+import com.kcube.mavenview.services.ViewPreferences;
 import com.kcube.mavenview.services.PomWatcher;
-import com.kcube.mavenview.services.PomScanner;
 import com.kcube.mavenview.services.RunOptions;
 
 /**
@@ -78,15 +61,6 @@ import com.kcube.mavenview.services.RunOptions;
 public final class MavenGoalsView extends ViewPart
 {
 	public static final String ID = "com.kcube.mavenview.views.mavenGoals";
-	private static final String PREFS_NODE = "com.kcube.mavenview";
-	private static final String PREF_USE_EXTERNAL_MVN = "useExternalMvn";
-	private static final String PREF_FAVORITES = "favoriteGoals";
-	private static final String PREF_RECENT = "recentGoals";
-	private static final String PREF_OPT_SKIP_TESTS = "runOptions.skipTests";
-	private static final String PREF_OPT_OFFLINE = "runOptions.offline";
-	private static final String PREF_OPT_UPDATE = "runOptions.updateSnapshots";
-	private static final String PREF_OPT_PROFILES = "runOptions.profiles";
-	private static final String PREF_OPT_EXTRA = "runOptions.extraArgs";
 	private static final String MEMENTO_TREE = "tree";
 	private static final String MEMENTO_EXPANDED = "expanded";
 	private static final String MEMENTO_PATH = "path";
@@ -346,7 +320,7 @@ public final class MavenGoalsView extends ViewPart
 		hookDragAndDrop();
 
 		// 체크박스를 실제로 그리기(createActions) 전에 저장된 값을 먼저 읽어와야 초기 상태가 맞는다.
-		useExternalMvn = InstanceScope.INSTANCE.getNode(PREFS_NODE).getBoolean(PREF_USE_EXTERNAL_MVN, false);
+		useExternalMvn = ViewPreferences.useExternalMvn();
 		createActions();
 		getSite().setSelectionProvider(viewer);
 		viewer.addSelectionChangedListener(e -> updateFavoritesIcon());
@@ -519,108 +493,49 @@ public final class MavenGoalsView extends ViewPart
 		}, this::persistRegisteredPoms, (msg) -> log(IStatus.WARNING, msg, null));
 	}
 
-	/**
-	 * 툴바에 올라가는 모든 Action/위젯을 생성하고 배치한다.
-	 */
+	/** 툴바를 구성한다. 각 버튼의 동작은 이 뷰의 메서드로 연결한다. */
 	private void createActions()
 	{
-		ISharedImages images = PlatformUI.getWorkbench().getSharedImages();
-
-		// 더블클릭과 동일하게, 현재 선택된 goal을 실행한다. 다른 툴바 버튼들과 마찬가지로 항상 활성 상태이며,
-		// 실행 불가능한 노드가 선택된 경우 runSelectedGoal()이 조용히 무시한다.
-		Action run = new Action(Messages.get("action.run"))
+		ViewToolbar.build(getViewSite().getActionBars().getToolBarManager(), new ViewToolbar.Handler()
 		{
-			/** 선택된 goal을 실행한다(더블클릭과 동일). */
 			@Override
 			public void run()
 			{
 				runSelectedGoal();
 			}
-		};
-		run.setToolTipText(Messages.get("action.run.tooltip"));
-		run.setImageDescriptor(AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/run.png"));
 
-		// 실행 중인 외부 mvn 빌드를 모두 중단한다(내장 Maven은 Eclipse 콘솔의 Terminate 버튼 사용).
-		Action stop = new Action(Messages.get("action.stop"))
-		{
-			/** 실행 중인 외부 mvn 프로세스를 중단한다. */
 			@Override
-			public void run()
+			public void update()
 			{
-				MavenExecutor.stopAll();
+				MavenProjectUpdater.updateSelected((IStructuredSelection) viewer.getSelection());
 			}
-		};
-		stop.setToolTipText(Messages.get("action.stop.tooltip"));
-		stop.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_ELCL_STOP));
 
-		Action updateProject = new Action(Messages.get("action.update"))
-		{
-			/** 선택된 프로젝트에 대해 Update Maven Project를 수행한다. */
 			@Override
-			public void run()
+			public void add()
 			{
-				updateSelectedProjects();
+				pomAdder().addViaDialog();
 			}
-		};
-		updateProject.setToolTipText(Messages.get("action.update.tooltip"));
-		updateProject.setImageDescriptor(
-			AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/update_dependencies.png"));
 
-		Action add = new Action(Messages.get("action.add"))
-		{
-			/** 파일 다이얼로그로 pom.xml을 골라 등록한다. */
 			@Override
-			public void run()
+			public void addFromSelection()
 			{
-				addPomViaDialog();
+				pomAdder().addFromSelection();
 			}
-		};
-		add.setToolTipText(Messages.get("action.add.tooltip"));
-		add.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_OBJ_ADD));
 
-		Action addFromSelection = new Action(Messages.get("action.addSelection"))
-		{
-			/** 다른 뷰에서 마지막으로 선택한 리소스의 pom.xml을 등록한다. */
 			@Override
-			public void run()
-			{
-				addPomFromSelection();
-			}
-		};
-		addFromSelection.setToolTipText(Messages.get("action.addSelection.tooltip"));
-		addFromSelection.setImageDescriptor(
-			AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/add_project.png"));
-
-		Action remove = new Action(Messages.get("action.remove"))
-		{
-			/** 선택된 프로젝트를 등록 목록에서 제거한다. */
-			@Override
-			public void run()
+			public void remove()
 			{
 				removeSelected();
 			}
-		};
-		remove.setToolTipText(Messages.get("action.remove.tooltip"));
-		remove.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_TOOL_DELETE));
 
-		Action refresh = new Action(Messages.get("action.refresh"))
-		{
-			/** 등록된 모든 pom.xml을 다시 파싱한다. */
 			@Override
-			public void run()
+			public void refresh()
 			{
 				refreshAll();
 			}
-		};
-		refresh.setToolTipText(Messages.get("action.refresh.tooltip"));
-		refresh.setImageDescriptor(
-			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui.ide", "icons/full/elcl16/refresh_nav.png"));
 
-		Action expandAll = new Action(Messages.get("action.expandAll"))
-		{
-			/** 선택된 노드 하위(없으면 트리 전체)를 모두 펼친다. */
 			@Override
-			public void run()
+			public void expandAll()
 			{
 				// 자식이 있는 노드가 선택돼 있으면 그 하위만 펼치고, 아니면 트리 전체를 펼친다.
 				Object selected = getSelectedContainer();
@@ -629,143 +544,26 @@ public final class MavenGoalsView extends ViewPart
 				else
 					viewer.expandAll();
 			}
-		};
-		expandAll.setToolTipText(Messages.get("action.expandAll"));
-		expandAll.setImageDescriptor(
-			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui", "icons/full/elcl16/expandall.png"));
 
-		Action collapseAll = new Action(Messages.get("action.collapseAll"))
-		{
-			/** 3단계 이하를 접는다. 프로젝트와 2단계 노드(Lifecycle/Plugins/Modules)는 펼친 상태로 둔다. */
 			@Override
-			public void run()
+			public void collapseAll()
 			{
 				collapseToLevel2();
 			}
-		};
-		collapseAll.setToolTipText(Messages.get("action.collapseAll"));
-		collapseAll.setImageDescriptor(
-			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui", "icons/full/elcl16/collapseall.png"));
 
-		// 네이티브 SWT 체크박스를 툴바 맨 왼쪽에 직접 꽂아넣기 위한 ControlContribution.
-		// Composite로 한 번 감싸는 이유는 GridData(CENTER)로 세로 정렬을 맞추기 위함.
-		ControlContribution useExternalCheckbox = new ControlContribution("useExternalMvnCheckbox")
-		{
-			/** "mvn" 체크박스를 담은 컨트롤을 만든다. 상태가 바뀌면 실행 방식을 preference에 저장한다. */
 			@Override
-			protected Control createControl(Composite parent)
+			public boolean useExternalMvn()
 			{
-				Composite holder = new Composite(parent, SWT.NONE);
-				GridLayout layout = new GridLayout(1, false);
-				layout.marginWidth = 0;
-				layout.marginHeight = 0;
-				holder.setLayout(layout);
-
-				Button checkbox = new Button(holder, SWT.CHECK);
-				checkbox.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, true));
-				checkbox.setText("mvn");
-				checkbox.setToolTipText(Messages.get("action.mvn.tooltip"));
-				checkbox.setSelection(useExternalMvn);
-				checkbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
-					useExternalMvn = checkbox.getSelection();
-					IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-					prefs.putBoolean(PREF_USE_EXTERNAL_MVN, useExternalMvn);
-					try
-					{
-						prefs.flush();
-					}
-					catch (Exception ex)
-					{
-						log(IStatus.WARNING, "Failed to persist mvn execution mode", ex);
-					}
-				}));
-				return holder;
+				return useExternalMvn;
 			}
-		};
 
-		IToolBarManager toolbar = getViewSite().getActionBars().getToolBarManager();
-		toolbar.add(useExternalCheckbox);
-		toolbar.add(new Separator());
-		toolbar.add(run);
-		toolbar.add(stop);
-		toolbar.add(createFavoritesAction());
-		toolbar.add(updateProject);
-		toolbar.add(new Separator());
-		toolbar.add(add);
-		toolbar.add(addFromSelection);
-		toolbar.add(remove);
-		toolbar.add(refresh);
-		toolbar.add(new Separator());
-		toolbar.add(expandAll);
-		toolbar.add(collapseAll);
-	}
-
-	/** 선택된 PROJECT 노드 중 워크스페이스에 실제 임포트된 프로젝트만 골라 Update Maven Project를 수행한다. */
-	private void updateSelectedProjects()
-	{
-		if (!(viewer.getSelection() instanceof IStructuredSelection ss) || ss.isEmpty())
-		{
-			log(IStatus.WARNING, "Select a registered project to update", null);
-			return;
-		}
-		List<IProject> toUpdate = new ArrayList<>();
-		for (Object o : ss.toArray())
-		{
-			if (o instanceof MavenGoal g)
+			@Override
+			public void setUseExternalMvn(boolean value)
 			{
-				File pom = g.resolvePomFile();
-				IProject project = pom == null ? null : findWorkspaceProject(pom.getParentFile());
-				if (project != null)
-					toUpdate.add(project);
+				useExternalMvn = value;
+				ViewPreferences.setUseExternalMvn(value);
 			}
-		}
-		if (toUpdate.isEmpty())
-		{
-			log(IStatus.WARNING, "Selected pom.xml is not part of a workspace project; nothing to update", null);
-			return;
-		}
-		scheduleUpdate(toUpdate);
-	}
-
-	/** m2e 버전에 따라 생성자 시그니처(IProject[] / Collection)가 달라 리플렉션으로 호출한다. */
-	private void scheduleUpdate(List<IProject> projects)
-	{
-		try
-		{
-			// m2e 내부(internal) 클래스라 import하면 PDE 접근 제한 오류가 나므로 이름으로 로드한다.
-			Class<?> jobClass = Class.forName("org.eclipse.m2e.core.ui.internal.UpdateMavenProjectJob");
-			Job job;
-			try
-			{
-				job = (Job) jobClass.getConstructor(IProject[].class).newInstance(
-					(Object) projects.toArray(new IProject[0]));
-			}
-			catch (NoSuchMethodException e)
-			{
-				job = (Job) jobClass.getConstructor(java.util.Collection.class).newInstance(projects);
-			}
-			job.schedule();
-		}
-		catch (ReflectiveOperationException e)
-		{
-			log(IStatus.ERROR, "Failed to start Update Maven Project", e);
-		}
-	}
-
-	/**
-	 * pom.xml이 있는 디렉터리와 위치가 일치하는 워크스페이스 IProject를 찾는다. 없으면 null.
-	 */
-	private static IProject findWorkspaceProject(File dir)
-	{
-		if (dir == null)
-			return null;
-		for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects())
-		{
-			IPath loc = p.getLocation();
-			if (loc != null && loc.toFile().equals(dir))
-				return p;
-		}
-		return null;
+		}, createFavoritesAction());
 	}
 
 	/**
@@ -830,24 +628,13 @@ public final class MavenGoalsView extends ViewPart
 	/** 즐겨찾기/최근 실행 목록을 preference에서 읽는다(최근 실행은 최대 개수까지만). */
 	private void loadGoalLists()
 	{
-		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		history.load(prefs.get(PREF_FAVORITES, ""), prefs.get(PREF_RECENT, ""));
+		ViewPreferences.loadHistory(history);
 	}
 
 	/** 즐겨찾기/최근 실행 목록을 preference에 저장한다. */
 	private void saveGoalLists()
 	{
-		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		prefs.put(PREF_FAVORITES, history.serializeFavorites());
-		prefs.put(PREF_RECENT, history.serializeRecents());
-		try
-		{
-			prefs.flush();
-		}
-		catch (Exception ex)
-		{
-			log(IStatus.WARNING, "Failed to persist favorites/recent goals", ex);
-		}
+		ViewPreferences.saveHistory(history);
 	}
 
 	/**
@@ -902,31 +689,13 @@ public final class MavenGoalsView extends ViewPart
 		File pom = g.resolvePomFile();
 		if (pom == null)
 			return;
-		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
-		RunOptions last = new RunOptions(
-			prefs.getBoolean(PREF_OPT_SKIP_TESTS, false),
-			prefs.getBoolean(PREF_OPT_OFFLINE, false),
-			prefs.getBoolean(PREF_OPT_UPDATE, false),
-			prefs.get(PREF_OPT_PROFILES, ""),
-			prefs.get(PREF_OPT_EXTRA, ""));
+		RunOptions last = ViewPreferences.loadRunOptions();
 		String initialGoals = g.getType() == MavenGoal.Type.PROJECT ? "clean install" : MavenExecutor.goalString(g);
 		RunOptionsDialog dialog = new RunOptionsDialog(viewer.getControl().getShell(), g.getName(), initialGoals, last);
 		if (dialog.open() != Window.OK)
 			return;
 		RunOptions chosen = dialog.getOptions();
-		prefs.putBoolean(PREF_OPT_SKIP_TESTS, chosen.skipTests());
-		prefs.putBoolean(PREF_OPT_OFFLINE, chosen.offline());
-		prefs.putBoolean(PREF_OPT_UPDATE, chosen.updateSnapshots());
-		prefs.put(PREF_OPT_PROFILES, chosen.profiles());
-		prefs.put(PREF_OPT_EXTRA, chosen.extraArgs());
-		try
-		{
-			prefs.flush();
-		}
-		catch (Exception ex)
-		{
-			log(IStatus.WARNING, "Failed to persist run options", ex);
-		}
+		ViewPreferences.saveRunOptions(chosen);
 		String commandLine = dialog.getCommandLine();
 		if (commandLine.isEmpty())
 			return;
@@ -1109,136 +878,15 @@ public final class MavenGoalsView extends ViewPart
 		return null;
 	}
 
-	/**
-	 * 파일 다이얼로그로 디스크에서 pom.xml 파일(복수 선택 가능)을 골라 등록한다.
-	 */
-	private void addPomViaDialog()
+	/** pom.xml 추가 대화상자 흐름(파일 선택, 선택한 프로젝트에서 자동 탐색)을 담당하는 도우미. */
+	private PomAdder pomAdder()
 	{
-		FileDialog dialog = new FileDialog(viewer.getControl().getShell(), SWT.OPEN | SWT.MULTI);
-		dialog.setText(Messages.get("fileDialog.title"));
-		dialog.setFilterNames(new String[] {Messages.get("fileDialog.pomFilter"), Messages.get("fileDialog.allFiles")});
-		dialog.setFilterExtensions(new String[] {"pom.xml;*.xml", "*.*"});
-		IPath workspaceLocation = ResourcesPlugin.getWorkspace().getRoot().getLocation();
-		if (workspaceLocation != null)
-			dialog.setFilterPath(workspaceLocation.toOSString());
-
-		if (dialog.open() == null)
-			return;
-		String dir = dialog.getFilterPath();
-		for (String fileName : dialog.getFileNames())
-		{
-			addPom(new File(dir, fileName));
-		}
-		persistRegisteredPoms();
-	}
-
-	/**
-	 * 선택한 프로젝트(복수 가능)에서 pom.xml을 자동으로 찾아 등록한다. 선택이 없으면 프로젝트를 고르게 한다. 후보가 하나면 바로 등록하고,
-	 * 여러 개면 체크 목록에서 고르게 한다. 이미 등록된 pom은 후보에서 뺀다.
-	 */
-	private void addPomFromSelection()
-	{
-		Shell shell = viewer.getControl().getShell();
-		List<IProject> targets = new ArrayList<>();
-		for (IProject p : selectionTracker.lastProjects())
-		{
-			if (p.exists() && p.getLocation() != null)
-				targets.add(p);
-		}
-		if (targets.isEmpty())
-		{
-			targets = chooseWorkspaceProjects(shell);
-			if (targets.isEmpty())
-				return;
-		}
-
-		Map<File, String> candidates = new LinkedHashMap<>();
-		int alreadyRegistered = 0;
-		for (IProject p : targets)
-		{
-			File dir = p.getLocation().toFile();
-			for (File pom : PomScanner.find(dir))
-			{
-				if (projects.containsKey(key(pom)))
-					alreadyRegistered++;
-				else
-					candidates.put(pom, p.getName() + "  \u2014  " + dir.toPath().relativize(pom.toPath()));
-			}
-		}
-		String title = Messages.get("scan.title");
-		if (candidates.isEmpty())
-		{
-			MessageDialog.openInformation(
-				shell,
-				title,
-				Messages.get(alreadyRegistered > 0 ? "scan.allRegistered" : "scan.none"));
-			return;
-		}
-
-		List<File> chosen = new ArrayList<>(candidates.keySet());
-		if (candidates.size() > 1)
-		{
-			ListSelectionDialog dialog = new ListSelectionDialog(
-				shell,
-				chosen,
-				ArrayContentProvider.getInstance(),
-				new LabelProvider()
-				{
-					@Override
-					public String getText(Object element)
-					{
-						return candidates.get(element);
-					}
-				},
-				Messages.get("scan.message"));
-			dialog.setTitle(title);
-			dialog.setInitialElementSelections(chosen);
-			if (dialog.open() != Window.OK)
-				return;
-			chosen = new ArrayList<>();
-			for (Object o : dialog.getResult())
-				chosen.add((File) o);
-		}
-		for (File pom : chosen)
-			addPom(pom);
-		if (!chosen.isEmpty())
-			persistRegisteredPoms();
-	}
-
-	/** 선택된 프로젝트가 없을 때, 루트에 pom.xml이 있는 열린 워크스페이스 프로젝트를 체크 목록으로 보여주고 고르게 한다. */
-	private List<IProject> chooseWorkspaceProjects(Shell shell)
-	{
-		List<IProject> mavenProjects = new ArrayList<>();
-		for (IProject p : ResourcesPlugin.getWorkspace().getRoot().getProjects())
-		{
-			if (p.isOpen() && p.getLocation() != null && new File(p.getLocation().toFile(), "pom.xml").isFile())
-				mavenProjects.add(p);
-		}
-		if (mavenProjects.isEmpty())
-		{
-			MessageDialog.openInformation(shell, Messages.get("scan.title"), Messages.get("scan.none"));
-			return List.of();
-		}
-		ListSelectionDialog dialog = new ListSelectionDialog(
-			shell,
-			mavenProjects,
-			ArrayContentProvider.getInstance(),
-			new LabelProvider()
-			{
-				@Override
-				public String getText(Object element)
-				{
-					return ((IProject) element).getName();
-				}
-			},
-			Messages.get("scan.chooseProjects"));
-		dialog.setTitle(Messages.get("scan.title"));
-		if (dialog.open() != Window.OK)
-			return List.of();
-		List<IProject> chosen = new ArrayList<>();
-		for (Object o : dialog.getResult())
-			chosen.add((IProject) o);
-		return chosen;
+		return new PomAdder(
+			viewer.getControl().getShell(),
+			selectionTracker,
+			pomFile -> projects.containsKey(key(pomFile)),
+			this::addPom,
+			this::persistRegisteredPoms);
 	}
 
 	/**
@@ -1344,8 +992,7 @@ public final class MavenGoalsView extends ViewPart
 	/** Eclipse Error Log에 메시지를 남긴다(상태/예외 모두 여기로 모아서 기록). */
 	private void log(int severity, String message, Throwable e)
 	{
-		org.eclipse.core.runtime.Platform.getLog(getClass()).log(
-			new Status(severity, "com.kcube.mavenview", message, e));
+		PluginLog.log(severity, message, e);
 	}
 
 	/** 뷰가 활성화되면 포커스를 트리에 준다. */
