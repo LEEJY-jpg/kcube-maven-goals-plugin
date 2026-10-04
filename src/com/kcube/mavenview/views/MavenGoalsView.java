@@ -8,8 +8,6 @@ import java.util.Map;
 
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.jface.action.Action;
-import org.eclipse.jface.action.IAction;
-import org.eclipse.jface.action.IMenuCreator;
 import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.resource.JFaceResources;
@@ -26,6 +24,7 @@ import org.eclipse.jface.viewers.ViewerFilter;
 import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.graphics.Font;
+import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
@@ -762,61 +761,60 @@ public final class MavenGoalsView extends ViewPart
 				on ? "icons/favorite_on.png" : "icons/favorite.png"));
 	}
 
-	/** 툴바의 즐겨찾기/최근 실행 드롭다운 버튼을 만든다. 항목을 고르면 바로 실행한다. */
+	/** 툴바의 즐겨찾기/최근 실행 버튼을 만든다. 별을 누르면 목록 메뉴가 바로 열리고, 항목을 고르면 실행한다. */
 	private Action createFavoritesAction()
 	{
-		Action action = new Action(Messages.get("favorites.action"), IAction.AS_DROP_DOWN_MENU)
+		Action action = new Action(Messages.get("favorites.action"))
 		{
 			@Override
 			public void run()
 			{
-				// 별 버튼 본체를 누르면 선택한 goal의 즐겨찾기를 토글한다. 목록은 옆의 드롭다운 화살표로 연다.
-				if (viewer.getSelection() instanceof IStructuredSelection ss
-					&& ss.getFirstElement() instanceof MavenGoal g
-					&& g.getGoal() != null)
-				{
-					toggleFavorite(g);
-				}
+				showGoalMenu();
 			}
 		};
 		favoritesAction = action;
 		action.setToolTipText(Messages.get("favorites.tooltip"));
 		updateFavoritesIcon();
-		action.setMenuCreator(new IMenuCreator()
-		{
-			private Menu menu;
-
-			@Override
-			public Menu getMenu(Control parent)
-			{
-				dispose();
-				MenuManager manager = new MenuManager();
-				fillGoalMenu(manager);
-				menu = manager.createContextMenu(parent);
-				return menu;
-			}
-
-			@Override
-			public Menu getMenu(org.eclipse.swt.widgets.Menu parent)
-			{
-				return null;
-			}
-
-			@Override
-			public void dispose()
-			{
-				if (menu != null && !menu.isDisposed())
-					menu.dispose();
-				menu = null;
-			}
-		});
 		return action;
+	}
+
+	/** 마우스 위치(눌린 별 버튼 근처)에 즐겨찾기/최근 실행 메뉴를 띄운다. */
+	private void showGoalMenu()
+	{
+		Control control = viewer.getControl();
+		MenuManager manager = new MenuManager();
+		fillGoalMenu(manager);
+		Menu menu = manager.createContextMenu(control);
+		// 메뉴가 닫히면 정리한다(선택한 항목의 run()이 먼저 실행된 뒤에 해제되도록 비동기로).
+		menu.addListener(SWT.Hide, e -> control.getDisplay().asyncExec(() -> {
+			if (!menu.isDisposed())
+				menu.dispose();
+			manager.dispose();
+		}));
+		Point p = control.getDisplay().getCursorLocation();
+		menu.setLocation(p.x, p.y);
+		menu.setVisible(true);
 	}
 
 	/** 드롭다운 메뉴 내용을 채운다: 즐겨찾기, 구분선, 최근 실행, 최근 목록 지우기. */
 	private void fillGoalMenu(MenuManager manager)
 	{
 		pruneMissingPoms();
+		// 선택한 goal이 있으면 메뉴 맨 위에서 즐겨찾기에 추가/해제할 수 있다.
+		if (viewer.getSelection() instanceof IStructuredSelection ss
+			&& ss.getFirstElement() instanceof MavenGoal g
+			&& g.getGoal() != null)
+		{
+			manager.add(new Action(Messages.get(isFavorite(g) ? "favorites.remove" : "favorites.add"))
+			{
+				@Override
+				public void run()
+				{
+					toggleFavorite(g);
+				}
+			});
+			manager.add(new Separator());
+		}
 		if (history.favorites().isEmpty() && history.recents().isEmpty())
 		{
 			Action empty = new Action(Messages.get("favorites.empty"))
