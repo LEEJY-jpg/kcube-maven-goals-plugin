@@ -42,7 +42,18 @@ public final class MavenExecutor
 	 */
 	public static void run(File pom, MavenGoal goal, boolean useExternalMvn)
 	{
-		String goalString = goal.getType() == MavenGoal.Type.EXECUTION ? goal.getGoal() : goal.getName();
+		run(pom, goalString(goal), useExternalMvn);
+	}
+
+	/** 노드에서 Maven에 전달할 실행 문자열을 꺼낸다. EXECUTION은 goal 필드, 그 외(phase 등)는 노드 이름이다. */
+	public static String goalString(MavenGoal goal)
+	{
+		return goal.getType() == MavenGoal.Type.EXECUTION ? goal.getGoal() : goal.getName();
+	}
+
+	/** 실행 문자열(예: "clean install")로 직접 실행한다. 즐겨찾기/최근 실행 목록에서 다시 실행할 때 쓴다. */
+	public static void run(File pom, String goalString, boolean useExternalMvn)
+	{
 		if (useExternalMvn)
 		{
 			runExternal(pom, goalString);

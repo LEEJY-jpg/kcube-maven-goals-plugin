@@ -17,6 +17,9 @@ import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.core.runtime.preferences.IEclipsePreferences;
 import org.eclipse.core.runtime.preferences.InstanceScope;
 import org.eclipse.jface.action.Action;
+import org.eclipse.jface.action.IAction;
+import org.eclipse.jface.action.IMenuCreator;
+import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.ControlContribution;
 import org.eclipse.jface.action.IToolBarManager;
 import org.eclipse.jface.action.Separator;
@@ -45,10 +48,14 @@ import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.FileDialog;
+import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Text;
+import org.eclipse.ui.IMemento;
 import org.eclipse.ui.ISelectionListener;
 import org.eclipse.ui.ISharedImages;
+import org.eclipse.ui.IViewSite;
 import org.eclipse.ui.IWorkbenchPart;
+import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.part.ResourceTransfer;
 import org.eclipse.ui.part.ViewPart;
@@ -71,6 +78,18 @@ public final class MavenGoalsView extends ViewPart
 	private static final String PREFS_NODE = "com.kcube.mavenview";
 	private static final String PREF_POMS = "registeredPoms";
 	private static final String PREF_USE_EXTERNAL_MVN = "useExternalMvn";
+	private static final String PREF_FAVORITES = "favoriteGoals";
+	private static final String PREF_RECENT = "recentGoals";
+	/** 즐겨찾기/최근 실행 항목 안에서 pom 경로와 goal 문자열을 구분하는 문자. */
+	private static final String ENTRY_SEP = "\t";
+	/** 최근 실행 목록에 보관할 최대 개수. */
+	private static final int MAX_RECENT = 10;
+	private static final String MEMENTO_TREE = "tree";
+	private static final String MEMENTO_EXPANDED = "expanded";
+	private static final String MEMENTO_PATH = "path";
+	private static final String MEMENTO_FILTER = "filter";
+	/** 펼침 상태 경로에서 pom 경로와 노드 이름들을 구분하는 문자(경로/이름에 나올 수 없는 제어문자). */
+	private static final String PATH_NODE_SEP = "\u0001";
 	/** {@link #PREF_POMS}에 여러 pom.xml 경로를 이어붙일 때 쓰는 구분자. 파일 경로엔 나올 수 없는 개행문자를 사용. */
 	private static final String PATH_SEP = "\n";
 	/** 트리 기본 펼침 깊이: 프로젝트 루트(1) → Lifecycle/Plugins(2)까지 보이도록 펼친다. */
@@ -93,6 +112,13 @@ public final class MavenGoalsView extends ViewPart
 	private Runnable pendingFilter;
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
 	private boolean useExternalMvn;
+	/** 즐겨찾기 goal 목록("pom경로\tgoal" 형태). 추가한 순서를 유지한다. */
+	private final java.util.Set<String> favorites = new java.util.LinkedHashSet<>();
+	/** 최근 실행한 goal 목록. 맨 앞이 가장 최근이다. */
+	private final java.util.LinkedList<String> recents = new java.util.LinkedList<>();
+	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
+	private IMemento savedState;
+	private Text filterBox;
 	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
 	/**
@@ -109,6 +135,95 @@ public final class MavenGoalsView extends ViewPart
 		}
 	};
 
+	/** 이전 세션에서 저장한 뷰 상태(펼침 노드, 검색어)를 보관해 둔다. */
+	@Override
+	public void init(IViewSite site, IMemento memento) throws PartInitException
+	{
+		super.init(site, memento);
+		savedState = memento;
+	}
+
+	/** 워크벤치가 종료되거나 뷰가 닫힐 때 트리의 펼침 상태와 검색어를 저장한다. */
+	@Override
+	public void saveState(IMemento memento)
+	{
+		if (viewer == null || viewer.getControl().isDisposed())
+			return;
+		IMemento tree = memento.createChild(MEMENTO_TREE);
+		tree.putString(MEMENTO_FILTER, filterBox.getText());
+		for (Object o : viewer.getExpandedElements())
+		{
+			if (o instanceof MavenGoal g)
+			{
+				String path = nodePath(g);
+				if (path != null)
+					tree.createChild(MEMENTO_EXPANDED).putString(MEMENTO_PATH, path);
+			}
+		}
+	}
+
+	/** 노드를 식별하는 문자열(pom 경로 + 루트부터의 이름 체인)을 만든다. */
+	private static String nodePath(MavenGoal g)
+	{
+		File pom = g.resolvePomFile();
+		if (pom == null)
+			return null;
+		java.util.LinkedList<String> names = new java.util.LinkedList<>();
+		for (MavenGoal n = g; n != null && n.getType() != MavenGoal.Type.PROJECT; n = n.getParent())
+			names.addFirst(n.getName());
+		return key(pom) + PATH_NODE_SEP + String.join(PATH_NODE_SEP, names);
+	}
+
+	/** 저장된 상태가 있으면 검색어와 펼침 상태를 복원한다. 없으면 기본 펼침 상태를 유지한다. */
+	private void restoreState()
+	{
+		IMemento tree = savedState == null ? null : savedState.getChild(MEMENTO_TREE);
+		savedState = null;
+		if (tree == null)
+			return;
+		String filter = tree.getString(MEMENTO_FILTER);
+		if (filter != null && !filter.isBlank())
+		{
+			filterBox.setText(filter);
+			if (pendingFilter != null)
+				filterBox.getDisplay().timerExec(-1, pendingFilter);
+			pendingFilter = null;
+			applyFilter(filter);
+		}
+		java.util.Set<String> wanted = new java.util.HashSet<>();
+		for (IMemento e : tree.getChildren(MEMENTO_EXPANDED))
+		{
+			String path = e.getString(MEMENTO_PATH);
+			if (path != null)
+				wanted.add(path);
+		}
+		java.util.List<MavenGoal> toExpand = new ArrayList<>();
+		for (MavenGoal root : projects.values())
+			collectExpanded(root, wanted, toExpand);
+		viewer.getControl().setRedraw(false);
+		try
+		{
+			viewer.collapseAll();
+			viewer.setExpandedElements(toExpand.toArray());
+		}
+		finally
+		{
+			viewer.getControl().setRedraw(true);
+		}
+	}
+
+	/** 저장된 경로와 일치하는 노드를 재귀적으로 찾아 모은다. */
+	private static void collectExpanded(MavenGoal node, java.util.Set<String> wanted, java.util.List<MavenGoal> out)
+	{
+		String path = nodePath(node);
+		if (node.getType() == MavenGoal.Type.PROJECT)
+			path = key(node.getPomFile()) + PATH_NODE_SEP;
+		if (path != null && wanted.contains(path))
+			out.add(node);
+		for (MavenGoal child : MavenPomParser.children(node))
+			collectExpanded(child, wanted, out);
+	}
+
 	/** 뷰의 UI를 구성한다. 검색창과 트리를 만들고, 콘텐츠/라벨 프로바이더·필터·드래그앤드롭·툴바를 설정한 뒤 저장된 pom.xml 목록을 불러온다. */
 	@Override
 	public void createPartControl(Composite parent)
@@ -119,7 +234,7 @@ public final class MavenGoalsView extends ViewPart
 		rootLayout.marginHeight = 0;
 		rootLayout.verticalSpacing = 0;
 		parent.setLayout(rootLayout);
-		Text filterBox = new Text(parent, SWT.SEARCH | SWT.ICON_SEARCH | SWT.ICON_CANCEL);
+		filterBox = new Text(parent, SWT.SEARCH | SWT.ICON_SEARCH | SWT.ICON_CANCEL);
 		filterBox.setMessage("Filter goals");
 		filterBox.setToolTipText("Type a keyword to show only matching goals (Esc to clear)");
 		filterBox.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
@@ -171,7 +286,7 @@ public final class MavenGoalsView extends ViewPart
 			{
 			}
 		});
-		viewer.setLabelProvider(new MavenGoalLabelProvider());
+		viewer.setLabelProvider(new MavenGoalLabelProvider(this::isFavorite));
 		// 더블클릭: 실행 가능한 노드(goal이 설정된 노드)는 실행하고, 폴더성 노드(프로젝트/Lifecycle/Plugins/플러그인)는 접기/펼치기를 토글한다.
 		viewer.addDoubleClickListener(e -> {
 			if (((IStructuredSelection) e.getSelection()).getFirstElement() instanceof MavenGoal g
@@ -208,7 +323,10 @@ public final class MavenGoalsView extends ViewPart
 		getSite().setSelectionProvider(viewer);
 		getSite().getWorkbenchWindow().getSelectionService().addSelectionListener(externalSelectionTracker);
 
+		loadGoalLists();
+		hookContextMenu();
 		loadRegisteredPoms();
+		restoreState();
 	}
 
 	/** 뷰가 닫힐 때 외부 선택 추적 리스너를 해제한다. */
@@ -542,6 +660,7 @@ public final class MavenGoalsView extends ViewPart
 		toolbar.add(useExternalCheckbox);
 		toolbar.add(new Separator());
 		toolbar.add(run);
+		toolbar.add(createFavoritesAction());
 		toolbar.add(updateProject);
 		toolbar.add(new Separator());
 		toolbar.add(add);
@@ -632,7 +751,233 @@ public final class MavenGoalsView extends ViewPart
 		{
 			File pom = g.resolvePomFile();
 			if (pom != null)
+			{
+				addRecent(entry(pom, g));
 				MavenExecutor.run(pom, g, useExternalMvn);
+			}
+		}
+	}
+
+	/** 즐겨찾기/최근 실행 항목 문자열("pom경로\tgoal")을 만든다. */
+	private static String entry(File pom, MavenGoal g)
+	{
+		return key(pom) + ENTRY_SEP + MavenExecutor.goalString(g);
+	}
+
+	/** 항목 문자열에서 pom 경로를 꺼낸다. */
+	private static String entryPom(String entry)
+	{
+		return entry.substring(0, entry.indexOf(ENTRY_SEP));
+	}
+
+	/** 항목 문자열에서 goal 문자열을 꺼낸다. */
+	private static String entryGoal(String entry)
+	{
+		return entry.substring(entry.indexOf(ENTRY_SEP) + ENTRY_SEP.length());
+	}
+
+	/** 메뉴에 표시할 라벨("프로젝트 : goal")을 만든다. */
+	private String entryLabel(String entry)
+	{
+		MavenGoal project = projects.get(entryPom(entry));
+		String name = project != null ? project.getName() : new File(entryPom(entry)).getParentFile().getName();
+		return name + " : " + entryGoal(entry);
+	}
+
+	/** 노드가 즐겨찾기에 등록돼 있는지 확인한다. */
+	private boolean isFavorite(MavenGoal g)
+	{
+		File pom = g.resolvePomFile();
+		return g.getGoal() != null && pom != null && favorites.contains(entry(pom, g));
+	}
+
+	/** 즐겨찾기 등록/해제를 토글하고 저장한다. */
+	private void toggleFavorite(MavenGoal g)
+	{
+		File pom = g.resolvePomFile();
+		if (pom == null || g.getGoal() == null)
+			return;
+		String e = entry(pom, g);
+		if (!favorites.remove(e))
+			favorites.add(e);
+		saveGoalList(PREF_FAVORITES, favorites);
+		viewer.refresh();
+	}
+
+	/** 최근 실행 목록 맨 앞에 추가하고(중복 제거, 최대 개수 유지) 저장한다. */
+	private void addRecent(String entry)
+	{
+		recents.remove(entry);
+		recents.addFirst(entry);
+		while (recents.size() > MAX_RECENT)
+			recents.removeLast();
+		saveGoalList(PREF_RECENT, recents);
+	}
+
+	/** 즐겨찾기/최근 실행 목록을 preference에서 읽는다. */
+	private void loadGoalLists()
+	{
+		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
+		for (String e : prefs.get(PREF_FAVORITES, "").split(PATH_SEP))
+			if (e.contains(ENTRY_SEP))
+				favorites.add(e);
+		for (String e : prefs.get(PREF_RECENT, "").split(PATH_SEP))
+			if (e.contains(ENTRY_SEP))
+				recents.add(e);
+	}
+
+	/** 항목 목록을 preference에 저장한다. */
+	private void saveGoalList(String prefKey, java.util.Collection<String> entries)
+	{
+		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
+		prefs.put(prefKey, String.join(PATH_SEP, entries));
+		try
+		{
+			prefs.flush();
+		}
+		catch (Exception ex)
+		{
+			log(IStatus.WARNING, "Failed to persist " + prefKey, ex);
+		}
+	}
+
+	/** 항목을 현재 실행 방식(외부 mvn/내장)으로 실행하고 최근 목록에 올린다. */
+	private void runEntry(String entry)
+	{
+		File pom = new File(entryPom(entry));
+		if (!pom.isFile())
+		{
+			log(IStatus.WARNING, "pom.xml no longer exists: " + pom, null);
+			return;
+		}
+		addRecent(entry);
+		MavenExecutor.run(pom, entryGoal(entry), useExternalMvn);
+	}
+
+	/** 트리 우클릭 메뉴: 실행 가능한 노드에 대해 Run과 즐겨찾기 추가/해제를 제공한다. */
+	private void hookContextMenu()
+	{
+		MenuManager manager = new MenuManager();
+		manager.setRemoveAllWhenShown(true);
+		manager.addMenuListener(m -> {
+			if (viewer.getSelection() instanceof IStructuredSelection ss
+				&& ss.getFirstElement() instanceof MavenGoal g
+				&& g.getGoal() != null)
+			{
+				m.add(new Action("Run")
+				{
+					@Override
+					public void run()
+					{
+						runSelectedGoal();
+					}
+				});
+				m.add(new Action(isFavorite(g) ? "Remove from Favorites" : "Add to Favorites")
+				{
+					@Override
+					public void run()
+					{
+						toggleFavorite(g);
+					}
+				});
+			}
+		});
+		viewer.getControl().setMenu(manager.createContextMenu(viewer.getControl()));
+	}
+
+	/** 툴바의 즐겨찾기/최근 실행 드롭다운 버튼을 만든다. 항목을 고르면 바로 실행한다. */
+	private Action createFavoritesAction()
+	{
+		Action action = new Action("Favorites / Recent", IAction.AS_DROP_DOWN_MENU)
+		{
+			@Override
+			public void run()
+			{
+				// 버튼 본체 클릭은 아무 동작도 하지 않는다(드롭다운 화살표로만 사용).
+			}
+		};
+		action.setToolTipText("Favorite and recently run goals");
+		action.setImageDescriptor(PlatformUI.getWorkbench().getSharedImages().getImageDescriptor(
+			ISharedImages.IMG_OBJS_INFO_TSK));
+		action.setMenuCreator(new IMenuCreator()
+		{
+			private Menu menu;
+
+			@Override
+			public Menu getMenu(Control parent)
+			{
+				dispose();
+				MenuManager manager = new MenuManager();
+				fillGoalMenu(manager);
+				menu = manager.createContextMenu(parent);
+				return menu;
+			}
+
+			@Override
+			public Menu getMenu(org.eclipse.swt.widgets.Menu parent)
+			{
+				return null;
+			}
+
+			@Override
+			public void dispose()
+			{
+				if (menu != null && !menu.isDisposed())
+					menu.dispose();
+				menu = null;
+			}
+		});
+		return action;
+	}
+
+	/** 드롭다운 메뉴 내용을 채운다: 즐겨찾기, 구분선, 최근 실행, 최근 목록 지우기. */
+	private void fillGoalMenu(MenuManager manager)
+	{
+		if (favorites.isEmpty() && recents.isEmpty())
+		{
+			Action empty = new Action("(No favorites or recent goals)")
+			{
+			};
+			empty.setEnabled(false);
+			manager.add(empty);
+			return;
+		}
+		for (String e : favorites)
+		{
+			manager.add(new Action("\u2605 " + entryLabel(e))
+			{
+				@Override
+				public void run()
+				{
+					runEntry(e);
+				}
+			});
+		}
+		if (!favorites.isEmpty() && !recents.isEmpty())
+			manager.add(new Separator());
+		for (String e : recents)
+		{
+			manager.add(new Action(entryLabel(e))
+			{
+				@Override
+				public void run()
+				{
+					runEntry(e);
+				}
+			});
+		}
+		if (!recents.isEmpty())
+		{
+			manager.add(new Separator());
+			manager.add(new Action("Clear Recent")
+			{
+				@Override
+				public void run()
+				{
+					recents.clear();
+					saveGoalList(PREF_RECENT, recents);
+				}
+			});
 		}
 	}
 
@@ -818,6 +1163,14 @@ public final class MavenGoalsView extends ViewPart
 	private static final class MavenGoalLabelProvider extends LabelProvider implements IFontProvider
 	{
 		private final Font boldFont = JFaceResources.getFontRegistry().getBold(JFaceResources.DEFAULT_FONT);
+		/** 즐겨찾기 여부 판정기. 즐겨찾기 노드에는 별 표시를 붙인다. */
+		private final java.util.function.Predicate<MavenGoal> favorite;
+
+		/** @param favorite 노드가 즐겨찾기인지 알려주는 함수 */
+		MavenGoalLabelProvider(java.util.function.Predicate<MavenGoal> favorite)
+		{
+			this.favorite = favorite;
+		}
 
 		/** 플러그인 노드는 artifactId만, 그 외 노드는 이름을 그대로 표시한다. */
 		@Override
@@ -825,6 +1178,8 @@ public final class MavenGoalsView extends ViewPart
 		{
 			if (element instanceof MavenGoal g && isPluginEntry(g))
 				return g.getArguments()[1];
+			if (element instanceof MavenGoal g && favorite.test(g))
+				return "\u2605 " + g.getName();
 			return element.toString();
 		}
 
