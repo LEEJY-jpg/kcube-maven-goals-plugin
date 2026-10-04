@@ -10,7 +10,8 @@
 #   ECLIPSE_HOME  Eclipse.app/Contents/Eclipse 경로 (컴파일 클래스패스 + 설치 대상)
 #   JAVA_HOME     JDK 17 이상 (--release 17 로 컴파일)
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT/com.kcube.mavenview"
 
 ECLIPSE_HOME="${ECLIPSE_HOME:-}"
 if [ -z "$ECLIPSE_HOME" ]; then
@@ -26,7 +27,7 @@ fi
 JAVAC="${JAVA_HOME:+$JAVA_HOME/bin/}javac"; JAR="${JAVA_HOME:+$JAVA_HOME/bin/}jar"
 
 VERSION="$(sed -n 's/^Bundle-Version: *//p' META-INF/MANIFEST.MF | tr -d "\r" | sed "s/\.qualifier$//")"
-OUT="dist/com.kcube.mavenview_${VERSION}.jar"
+OUT="$ROOT/dist/com.kcube.mavenview_${VERSION}.jar"
 # 같은 1.0.0 이어도 빌드마다 qualifier(타임스탬프)를 붙여, Eclipse 가 옛 번들과 새 번들을 구분하게 한다.
 QUALIFIER="${QUALIFIER:-$(date +%Y%m%d%H%M)}"
 BUILD="$(mktemp -d)"
@@ -46,7 +47,7 @@ echo "compile (--release 17) ..."
 "$JAVAC" --release 17 -encoding UTF-8 -cp "$CP" -d "$BUILD" $(find src -name '*.java')
 cp -R icons "$BUILD/icons"; cp plugin.xml plugin*.properties "$BUILD/"
 (cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
-mkdir -p dist
+mkdir -p "$ROOT/dist"
 sed "s/^\(Bundle-Version: .*\)\.qualifier\(\r\)\{0,1\}$/\1.${QUALIFIER}\2/" META-INF/MANIFEST.MF > "$BUILD/MANIFEST.MF"
 "$JAR" --create --file "$OUT" --manifest "$BUILD/MANIFEST.MF" -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties -C "$BUILD" plugin_ja.properties -C "$BUILD" plugin_zh.properties
 echo "built: $OUT (Bundle-Version ${VERSION}.${QUALIFIER})"

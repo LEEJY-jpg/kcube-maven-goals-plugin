@@ -1,8 +1,8 @@
 # Build output (dist/ 의 배포용 jar는 설치방법.md 에서 참조하므로 추적 대상)
-/bin/
-/bin-test/
+bin/
+bin-test/
 /out/
-/target/
+target/
 
 # OS
 .DS_Store
