@@ -45,7 +45,7 @@ echo "compile (--release 17) ..."
 cp -R icons "$BUILD/icons"; cp plugin.xml plugin*.properties "$BUILD/"
 (cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
 mkdir -p dist
-"$JAR" --create --file "$OUT" --manifest META-INF/MANIFEST.MF -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties
+"$JAR" --create --file "$OUT" --manifest META-INF/MANIFEST.MF -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties -C "$BUILD" plugin_ja.properties -C "$BUILD" plugin_zh.properties
 echo "built: $OUT"
 
 if [ "${1:-}" = "--install" ]; then
