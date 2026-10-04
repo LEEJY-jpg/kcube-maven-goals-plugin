@@ -131,6 +131,8 @@ public final class MavenGoalsView extends ViewPart
 	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
 	private IMemento savedState;
 	private Text filterBox;
+	/** 툴바의 즐겨찾기(별) 버튼. 선택에 따라 아이콘이 바뀐다. */
+	private Action favoritesAction;
 	/** pom.xml 절대 경로 -> 파싱된 프로젝트 루트. 등록한 순서를 유지한다. */
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
 	/**
@@ -362,6 +364,7 @@ public final class MavenGoalsView extends ViewPart
 		useExternalMvn = InstanceScope.INSTANCE.getNode(PREFS_NODE).getBoolean(PREF_USE_EXTERNAL_MVN, false);
 		createActions();
 		getSite().setSelectionProvider(viewer);
+		viewer.addSelectionChangedListener(e -> updateFavoritesIcon());
 		getSite().getWorkbenchWindow().getSelectionService().addSelectionListener(externalSelectionTracker);
 
 		loadGoalLists();
@@ -807,6 +810,7 @@ public final class MavenGoalsView extends ViewPart
 			favorites.add(e);
 		saveGoalList(PREF_FAVORITES, favorites);
 		viewer.refresh();
+		updateFavoritesIcon();
 	}
 
 	/** 최근 실행 목록 맨 앞에 추가하고(중복 제거, 최대 개수 유지) 저장한다. */
@@ -942,6 +946,20 @@ public final class MavenGoalsView extends ViewPart
 		viewer.getControl().setMenu(manager.createContextMenu(viewer.getControl()));
 	}
 
+	/** 선택한 goal이 즐겨찾기면 채워진 별, 아니면 빈 별 아이콘을 툴바 버튼에 표시한다. */
+	private void updateFavoritesIcon()
+	{
+		if (favoritesAction == null)
+			return;
+		boolean on = viewer.getSelection() instanceof IStructuredSelection ss
+			&& ss.getFirstElement() instanceof MavenGoal g
+			&& isFavorite(g);
+		favoritesAction.setImageDescriptor(
+			AbstractUIPlugin.imageDescriptorFromPlugin(
+				"com.kcube.mavenview",
+				on ? "icons/favorite_on.png" : "icons/favorite.png"));
+	}
+
 	/** 툴바의 즐겨찾기/최근 실행 드롭다운 버튼을 만든다. 항목을 고르면 바로 실행한다. */
 	private Action createFavoritesAction()
 	{
@@ -950,12 +968,18 @@ public final class MavenGoalsView extends ViewPart
 			@Override
 			public void run()
 			{
-				// 버튼 본체 클릭은 아무 동작도 하지 않는다(드롭다운 화살표로만 사용).
+				// 별 버튼 본체를 누르면 선택한 goal의 즐겨찾기를 토글한다. 목록은 옆의 드롭다운 화살표로 연다.
+				if (viewer.getSelection() instanceof IStructuredSelection ss
+					&& ss.getFirstElement() instanceof MavenGoal g
+					&& g.getGoal() != null)
+				{
+					toggleFavorite(g);
+				}
 			}
 		};
+		favoritesAction = action;
 		action.setToolTipText(Messages.get("favorites.tooltip"));
-		action.setImageDescriptor(PlatformUI.getWorkbench().getSharedImages().getImageDescriptor(
-			ISharedImages.IMG_OBJS_INFO_TSK));
+		updateFavoritesIcon();
 		action.setMenuCreator(new IMenuCreator()
 		{
 			private Menu menu;
