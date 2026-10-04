@@ -65,6 +65,7 @@ import org.eclipse.ui.plugin.AbstractUIPlugin;
 import com.kcube.mavenview.model.MavenGoal;
 import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.services.GoalFilter;
+import com.kcube.mavenview.services.GoalLabels;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
 import com.kcube.mavenview.services.RunOptions;
@@ -741,7 +742,7 @@ public final class MavenGoalsView extends ViewPart
 	{
 		MavenGoal project = projects.get(entryPom(entry));
 		String name = project != null ? project.getName() : new File(entryPom(entry)).getParentFile().getName();
-		return name + " : " + entryGoal(entry);
+		return name + " : " + GoalLabels.shorten(entryGoal(entry));
 	}
 
 	/** 노드가 즐겨찾기에 등록돼 있는지 확인한다. */
