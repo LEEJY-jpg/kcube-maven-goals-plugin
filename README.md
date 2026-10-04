@@ -12,6 +12,20 @@ Eclipse Plug-in for displaying Maven lifecycle phases and plugin goals in an Ant
 - Refresh from the current selection
 - Eclipse 4.x / Java 17+ target (built with `--release 17`)
 
+## Installation
+Requires Eclipse 2023-09 or later with m2e (included in most Eclipse packages) and Java 17+.
+
+1. Help > Install New Software... > Add...
+2. Location: `https://leejy-jpg.github.io/kcube-maven-goals-plugin/`
+3. Select **KCube Maven Tools** > **KCube Maven Goals**, then finish and restart Eclipse.
+4. Open Window > Show View > Other... > **Maven Goals**.
+
+> **Tip:** If the install tries to download hundreds of unrelated bundles or fails with
+> "Can't download artifact ...", uncheck
+> **"Contact all update sites during install to find required software"** in the install dialog.
+> This is caused by the many update sites registered in your Eclipse, not by this plug-in.
+> Also make sure only this site is selected under *Work with*.
+
 ## Project layout
 - `com.kcube.mavenview/` — the plug-in bundle (sources, `plugin.xml`, icons, tests)
 - `com.kcube.mavenview.feature/` — Eclipse feature
@@ -26,7 +40,7 @@ mvn clean verify
 
 The p2 repository is generated in `com.kcube.mavenview.update-site/target/repository`
 (and zipped as `com.kcube.mavenview.update-site-<version>.zip`).
-For a quick single-jar build for `dropins`, use `./build.sh` (see `개발사항.md`).
+For a quick single-jar build for `dropins`, use `./build.sh` (see `DEVELOPMENT.md`).
 
 ## Import (development)
 1. Eclipse: File > Import > Existing Projects into Workspace
