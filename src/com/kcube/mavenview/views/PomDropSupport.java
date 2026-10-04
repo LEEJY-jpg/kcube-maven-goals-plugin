@@ -27,8 +27,9 @@ final class PomDropSupport
 	 * @param register pom.xml을 등록하는 콜백. 등록했으면 true
 	 * @param onChanged 하나라도 등록된 뒤 한 번 호출된다(목록 저장용)
 	 * @param warn pom.xml이 아닌 항목을 무시할 때 호출되는 경고 출력
+	 * @return 생성한 {@link DropTarget}. 뷰가 정리될 때 호출자가 {@code dispose()}를 해야 네이티브 핸들이 풀린다.
 	 */
-	static void install(Control control, Predicate<File> register, Runnable onChanged, Consumer<String> warn)
+	static DropTarget install(Control control, Predicate<File> register, Runnable onChanged, Consumer<String> warn)
 	{
 		DropTarget target = new DropTarget(control, DND.DROP_COPY | DND.DROP_DEFAULT);
 		target.setTransfer(new Transfer[] {FileTransfer.getInstance(), ResourceTransfer.getInstance()});
@@ -67,9 +68,10 @@ final class PomDropSupport
 				}
 				if (changed)
 					onChanged.run();
-			}
-		});
-	}
+				}
+			});
+		return target;
+		}
 
 	/** 드롭된 경로가 pom.xml이면 그대로, 프로젝트 폴더면 그 안의 pom.xml을 등록한다. */
 	private static boolean registerPath(File dropped, Predicate<File> register, Consumer<String> warn)

@@ -32,17 +32,19 @@ public final class GoalHistory
 		return pomPath + ENTRY_SEP + goal;
 	}
 
-	/** 항목 문자열에서 pom 경로를 꺼낸다. */
+	/** 항목 문자열에서 pom 경로를 꺼낸다. 구분자가 없으면 전체를 반환한다. */
 	public static String pomOf(String entry)
-	{
-		return entry.substring(0, entry.indexOf(ENTRY_SEP));
-	}
+		{
+		int i = entry.indexOf(ENTRY_SEP);
+		return i < 0 ? entry : entry.substring(0, i);
+		}
 
-	/** 항목 문자열에서 goal 명령행을 꺼낸다. */
+	/** 항목 문자열에서 goal 명령행을 꺼낸다. 구분자가 없으면 빈 문자열을 반환한다. */
 	public static String goalOf(String entry)
-	{
-		return entry.substring(entry.indexOf(ENTRY_SEP) + ENTRY_SEP.length());
-	}
+		{
+		int i = entry.indexOf(ENTRY_SEP);
+		return i < 0 ? "" : entry.substring(i + ENTRY_SEP.length());
+		}
 
 	/** 즐겨찾기 목록(추가한 순서, 읽기 전용). */
 	public Set<String> favorites()

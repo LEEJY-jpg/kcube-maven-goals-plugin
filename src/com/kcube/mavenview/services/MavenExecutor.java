@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -96,6 +95,19 @@ public final class MavenExecutor
 	private static final Map<String, Process> RUNNING = new ConcurrentHashMap<>();
 
 	private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().contains("win");
+
+	static
+	{
+		// Eclipse가 실제로 종료될 때 fork된 mvn이 자식으로 남아있지 않도록 회수한다(단, 뷰를 닫는 것은 포함 안 함).
+		try
+			{
+			Runtime.getRuntime().addShutdownHook(new Thread(MavenExecutor::stopAll, "kcube-maven-shutdown"));
+				}
+		catch (IllegalStateException ignored)
+			{
+				// JVM이 이미 종료 중이면 추가할 수 없다.
+			}
+	}
 
 	/** 실행 중인 외부 mvn이 있는지 여부. */
 	public static boolean hasRunning()
@@ -277,45 +289,39 @@ public final class MavenExecutor
 			return null; // Windows는 GUI 앱도 시스템 PATH를 그대로 상속받는다.
 		String marker = "__KCUBE_PATH__:";
 		Process p = null;
+				// 공통 ForkJoinPool을 오염시키지 않도록 전용 스레드로 읽어, 타임아웃시 그 스레드만 정리한다.
+		java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
 		try
-		{
+				{
 			String shell = System.getenv().getOrDefault("SHELL", "/bin/zsh");
 			p = new ProcessBuilder(shell, "-ilc", "echo " + marker + "$PATH").redirectErrorStream(true).start();
-			final Process proc = p;
-			// 셸 초기화 파일이 입력을 기다리며 멈출 수 있으므로 시간 제한을 둔다.
-			String out = new String(
-				CompletableFuture.supplyAsync(() -> {
-					try
-					{
-						return proc.getInputStream().readAllBytes();
-					}
-					catch (java.io.IOException e)
-					{
-						throw new java.io.UncheckedIOException(e);
-					}
-				}).get(LOGIN_SHELL_TIMEOUT_SECONDS, TimeUnit.SECONDS),
-				StandardCharsets.UTF_8);
+			final Process proc = p; // lambda 캡처용 불변 참조
+					// 셸 초기화 파일이 입력을 기다리며 멈출 수 있으므로 시간 제한을 둔다.
+			byte[] bytes = pool.submit(() -> proc.getInputStream().readAllBytes())
+					.get(LOGIN_SHELL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+			String out = new String(bytes, StandardCharsets.UTF_8);
 			int idx = out.lastIndexOf(marker);
 			if (idx >= 0)
-			{
+				{
 				String rest = out.substring(idx + marker.length());
 				int nl = rest.indexOf('\n');
 				cachedLoginShellPath = (nl >= 0 ? rest.substring(0, nl) : rest).trim();
+				}
 			}
-		}
 		catch (TimeoutException e)
-		{
+			{
 			log(IStatus.WARNING, "Login shell did not report PATH within " + LOGIN_SHELL_TIMEOUT_SECONDS + "s", null);
-		}
+			}
 		catch (Exception e)
-		{
+			{
 			log(IStatus.WARNING, "Failed to read PATH from login shell", e);
-		}
+			}
 		finally
-		{
+			{
 			if (p != null)
 				p.destroyForcibly();
-		}
+			pool.shutdownNow();
+			}
 		return cachedLoginShellPath;
 	}
 

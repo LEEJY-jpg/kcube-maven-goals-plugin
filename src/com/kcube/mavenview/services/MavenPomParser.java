@@ -63,18 +63,9 @@ public final class MavenPomParser
 	 * @param visited 이미 파싱한 pom의 정규 경로. 순환 참조로 무한 재귀하는 것을 막는다.
 	 */
 	private static MavenGoal parseProject(File pom, MavenGoal parent, java.util.Set<String> visited) throws Exception
-	{
+		{
 		visited.add(pom.getCanonicalPath());
-		DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
-		f.setNamespaceAware(false);
-		try
-		{
-			f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-		}
-		catch (Exception ignored)
-		{
-		}
-		Document d = f.newDocumentBuilder().parse(pom);
+		Document d = newSecureDocumentBuilder().parse(pom);
 		Element project = d.getDocumentElement();
 
 		String name = text(project, "name");
@@ -173,9 +164,12 @@ public final class MavenPomParser
 				Element e = (Element) executions.item(j);
 				String id = text(e, "id");
 				NodeList goals = e.getElementsByTagName("goal");
-				for (int k = 0; k < goals.getLength(); k++)
+			for (int k = 0; k < goals.getLength(); k++)
 				{
-					String g = goals.item(k).getTextContent().trim();
+				String raw = goals.item(k).getTextContent();
+				if (raw == null || raw.isBlank())
+					continue;
+				String g = raw.trim();
 					// "plugin:goal@executionId"(Maven 3.3.1+)는 해당 execution 자신의
 					// <configuration>으로 실행한다. 그냥 "plugin:goal"로 실행하면 플러그인의 default-cli
 					// 실행이 돌아가 execution 블록은 완전히 무시된다.
@@ -215,12 +209,40 @@ public final class MavenPomParser
 
 	/** 파싱된 트리(예: 교체되거나 제거된 프로젝트 루트)를 자식 맵에서 재귀적으로 제거한다. */
 	public static void dispose(MavenGoal node)
-	{
+		{
 		List<MavenGoal> kids = CHILDREN.remove(node);
 		if (kids != null)
-		{
+			{
 			for (MavenGoal k : kids)
 				dispose(k);
+			}
+		}
+
+ 	/**
+	* XXE를 방지한 문서 빌더를 만든다. DOCTYPE 선언 자체를 금지하고, 지원되는 경우 외부 엔티티 로딩을 꺼낸다.
+	* 일부 파서에서 특정 feature가 unsupported이면 무시하고, 나머지 조치만 유지한다.
+	*/
+	public static javax.xml.parsers.DocumentBuilder newSecureDocumentBuilder() throws Exception
+		{
+		DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
+		f.setNamespaceAware(false);
+		setFeature(f, "http://apache.org/xml/features/disallow-doctype-decl", true);
+		setFeature(f, "http://xml.org/sax/features/external-general-entities", false);
+		setFeature(f, "http://xml.org/sax/features/external-parameter-entities", false);
+		setFeature(f, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+		return f.newDocumentBuilder();
+		}
+
+	/** feature가 현재 파서에서 지원되면 설정하고, 안 되면 조용히 무시한다. */
+	private static void setFeature(DocumentBuilderFactory f, String feature, boolean value)
+		{
+		try
+			{
+			f.setFeature(feature, value);
+			}
+		catch (Exception ignored)
+			{
+				// unsupported feature는 무시. disallow-doctype-decl이 핵심 차단이다.
+			}
 		}
 	}
-}

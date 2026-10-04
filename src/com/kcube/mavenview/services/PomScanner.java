@@ -8,8 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import javax.xml.parsers.DocumentBuilderFactory;
-
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -107,10 +105,8 @@ public final class PomScanner
 	{
 		List<File> modules = new ArrayList<>();
 		try
-		{
-			DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
-			f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-			Document d = f.newDocumentBuilder().parse(pom);
+			{
+			Document d = MavenPomParser.newSecureDocumentBuilder().parse(pom);
 			for (Node n = d.getDocumentElement().getFirstChild(); n != null; n = n.getNextSibling())
 			{
 				if (n instanceof Element e && e.getTagName().equals("modules"))

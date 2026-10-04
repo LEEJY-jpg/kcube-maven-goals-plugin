@@ -27,6 +27,7 @@ import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.dnd.DropTarget;
 import org.eclipse.swt.widgets.Menu;
 import org.eclipse.swt.widgets.Text;
 import org.eclipse.ui.IMemento;
@@ -84,6 +85,10 @@ public final class MavenGoalsView extends ViewPart
 	private final GoalFilter goalFilter = new GoalFilter();
 	/** 예약돼 있는(아직 실행 전인) 필터 적용 작업. 새 입력이 오면 취소하고 다시 예약한다. */
 	private Runnable pendingFilter;
+	/** 예약돼 있는(아직 실행 전인) 사라진 pom 정리 작업. 연속 포커스를 하나로 합치려고 지연 실행한다. */
+	private Runnable pendingPrune;
+	/** 사라진 pom 정리를 실행할 때까지 기다리는 지연(ms). 연속 포커스를 하나로 합친다. */
+	private static final int PRUNE_DELAY_MS = 500;
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
 	private boolean useExternalMvn;
 	/** 즐겨찾기와 최근 실행 목록. */
@@ -95,7 +100,9 @@ public final class MavenGoalsView extends ViewPart
 	private static final int POM_WATCH_INTERVAL_MS = 2000;
 
 	private Runnable pomWatchTask;
-	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
+ 			/** pom.xml 드롭을 받기 위한 드롭 대상. 뷰 종료 시 네이티브 핸들을 해제한다. */
+	private DropTarget dropTarget;
+		/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
 	private IMemento savedState;
 	private Text filterBox;
 	/** 툴바의 즐겨찾기(별) 버튼. 선택에 따라 아이콘이 바뀐다. */
@@ -371,10 +378,18 @@ public final class MavenGoalsView extends ViewPart
 	public void dispose()
 	{
 		getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(selectionTracker);
+		if (dropTarget != null && !dropTarget.isDisposed())
+			dropTarget.dispose();
 		if (pomWatchTask != null && viewer != null && !viewer.getControl().isDisposed())
 			viewer.getControl().getDisplay().timerExec(-1, pomWatchTask);
 		if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
 			viewer.getControl().getDisplay().timerExec(-1, pendingFilter);
+		if (pendingPrune != null && viewer != null && !viewer.getControl().isDisposed())
+			viewer.getControl().getDisplay().timerExec(-1, pendingPrune);
+		// 뷰가 닫히면 파싱 트리도 정적 맵에서 비워, 정적 CHILDREN에 노드가 잔존하지 않게 한다.
+		for (MavenGoal root : new java.util.ArrayList<>(projects.values()))
+			MavenPomParser.dispose(root);
+		projects.clear();
 		super.dispose();
 	}
 
@@ -443,10 +458,10 @@ public final class MavenGoalsView extends ViewPart
 	/** Finder/Project Explorer 등에서 pom.xml 또는 프로젝트 폴더를 뷰로 끌어다 놓으면 자동 등록한다. */
 	private void hookDragAndDrop()
 	{
-		PomDropSupport.install(viewer.getControl(), pomFile -> {
+		dropTarget = PomDropSupport.install(viewer.getControl(), pomFile -> {
 			addPom(pomFile);
 			return true;
-		}, this::persistRegisteredPoms, (msg) -> log(IStatus.WARNING, msg, null));
+			}, this::persistRegisteredPoms, (msg) -> log(IStatus.WARNING, msg, null));
 	}
 
 	/** 툴바를 구성한다. 각 버튼의 동작은 이 뷰의 메서드로 연결한다. */
@@ -950,12 +965,24 @@ public final class MavenGoalsView extends ViewPart
 		PluginLog.log(severity, message, e);
 	}
 
-	/** 뷰가 활성화되면 포커스를 트리에 준다. */
+	/** 뷰가 활성화되면 포커스를 트리에 준다. 사라진 pom 정리는 FS I/O라 지연 실행으로 합친다. */
 	@Override
 	public void setFocus()
 	{
-		pruneMissingPoms();
+		schedulePrune();
 		viewer.getControl().setFocus();
+	}
+
+	/** 사라진 pom 정리를 디스플레이 타이머로 위임한다. 연속 포커스는 하나의 실행으로 합친다. */
+	private void schedulePrune()
+	{
+		if (pendingPrune != null)
+			viewer.getControl().getDisplay().timerExec(-1, pendingPrune);
+		pendingPrune = () -> {
+			pendingPrune = null;
+			pruneMissingPoms();
+			};
+		viewer.getControl().getDisplay().timerExec(PRUNE_DELAY_MS, pendingPrune);
 	}
 
 	// 플러그인 항목은 getArguments()에 [groupId, artifactId]를 담고 있다. artifactId만
