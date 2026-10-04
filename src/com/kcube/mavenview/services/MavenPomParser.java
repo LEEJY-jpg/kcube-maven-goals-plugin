@@ -14,8 +14,7 @@ import com.kcube.mavenview.model.MavenGoal;
 /**
  * pom.xml 파일 하나를 읽어 {@link MavenGoal} 트리(PROJECT → Lifecycle/Plugins → 하위 goal)로 변환한다.
  * <p>
- * 트리의 부모-자식 관계는 {@link MavenGoal} 자체가 아니라 이 클래스가 들고 있는 {@link #CHILDREN} 맵에 별도로 저장된다. 뷰의 {@code ITreeContentProvider}는
- * {@link #children(MavenGoal)}을 통해 이 맵을 조회한다.
+ * 트리의 부모-자식 관계는 각 {@link MavenGoal} 이 직접 들고 있으며, 뷰의 {@code ITreeContentProvider}는 {@link #children(MavenGoal)}으로 조회한다.
  */
 public final class MavenPomParser
 {
@@ -192,34 +191,20 @@ public final class MavenPomParser
 		return s == null ? null : s.trim();
 	}
 
-	/** parent의 자식 목록에 child를 추가한다. 목록이 아직 없으면 새로 만든다. */
+	/** parent의 자식 목록에 child를 추가한다. */
 	private static void addChild(MavenGoal parent, MavenGoal child)
 	{
-		CHILDREN.computeIfAbsent(parent, k -> new java.util.ArrayList<>()).add(child);
+		parent.addChild(child);
 	}
-
-	/** 노드(identity 기준) → 자식 목록. 트리 구조 자체는 MavenGoal이 아니라 여기서 관리한다. */
-	private static final java.util.Map<MavenGoal, java.util.List<MavenGoal>> CHILDREN = new java.util.IdentityHashMap<>();
 
 	/** 뷰의 ITreeContentProvider가 호출하는 조회용 메서드. 자식이 없으면 빈 리스트. */
 	public static List<MavenGoal> children(MavenGoal goal)
 	{
-		return CHILDREN.getOrDefault(goal, java.util.List.of());
+		return goal.getChildren();
 	}
 
-	/** 파싱된 트리(예: 교체되거나 제거된 프로젝트 루트)를 자식 맵에서 재귀적으로 제거한다. */
-	public static void dispose(MavenGoal node)
-		{
-		List<MavenGoal> kids = CHILDREN.remove(node);
-		if (kids != null)
-			{
-			for (MavenGoal k : kids)
-				dispose(k);
-			}
-		}
-
- 	/**
-	* XXE를 방지한 문서 빌더를 만든다. DOCTYPE 선언 자체를 금지하고, 지원되는 경우 외부 엔티티 로딩을 꺼낸다.
+	/**
+	 * XXE를 방지한 문서 빌더를 만든다. DOCTYPE 선언 자체를 금지하고, 지원되는 경우 외부 엔티티 로딩을 꺼낸다.
 	* 일부 파서에서 특정 feature가 unsupported이면 무시하고, 나머지 조치만 유지한다.
 	*/
 	public static javax.xml.parsers.DocumentBuilder newSecureDocumentBuilder() throws Exception

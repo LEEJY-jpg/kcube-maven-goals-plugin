@@ -218,7 +218,7 @@ public final class MavenGoalsView extends ViewPart
 
 		viewer = new TreeViewer(parent);
 		viewer.getControl().setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-		// 트리 데이터는 뷰가 직접 들고 있지 않고 projects 맵(최상위) + MavenPomParser.CHILDREN(하위)에서 가져온다.
+		// 트리 데이터는 뷰가 직접 들고 있지 않고 projects 맵(최상위) + 각 MavenGoal 의 children(하위)에서 가져온다.
 		viewer.setContentProvider(new ITreeContentProvider()
 		{
 			/** 최상위 PROJECT 노드들을 이름순으로 반환한다. */
@@ -382,16 +382,13 @@ public final class MavenGoalsView extends ViewPart
 			dropTarget.dispose();
 		if (pomWatchTask != null && viewer != null && !viewer.getControl().isDisposed())
 			viewer.getControl().getDisplay().timerExec(-1, pomWatchTask);
-		if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
-			viewer.getControl().getDisplay().timerExec(-1, pendingFilter);
-		if (pendingPrune != null && viewer != null && !viewer.getControl().isDisposed())
-			viewer.getControl().getDisplay().timerExec(-1, pendingPrune);
-		// 뷰가 닫히면 파싱 트리도 정적 맵에서 비워, 정적 CHILDREN에 노드가 잔존하지 않게 한다.
-		for (MavenGoal root : new java.util.ArrayList<>(projects.values()))
-			MavenPomParser.dispose(root);
-		projects.clear();
-		super.dispose();
-	}
+	if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
+		viewer.getControl().getDisplay().timerExec(-1, pendingFilter);
+	if (pendingPrune != null && viewer != null && !viewer.getControl().isDisposed())
+		viewer.getControl().getDisplay().timerExec(-1, pendingPrune);
+	projects.clear();
+	super.dispose();
+}
 
 	/** 입력이 잠시 멈출 때까지 기다렸다가 필터를 적용한다. 키를 누를 때마다 트리를 다시 그리지 않도록 한다. */
 	private void scheduleFilter(Text filterBox)
@@ -619,10 +616,8 @@ public final class MavenGoalsView extends ViewPart
 		{
 			if (!new File(path).isFile())
 			{
-				MavenGoal old = projects.remove(path);
+				projects.remove(path);
 				pomWatcher.forget(path);
-				if (old != null)
-					MavenPomParser.dispose(old);
 				projectsChanged = true;
 			}
 		}
@@ -876,7 +871,6 @@ public final class MavenGoalsView extends ViewPart
 					if (projects.remove(key) != null)
 					{
 						pomWatcher.forget(key);
-						MavenPomParser.dispose(g);
 						changed = true;
 					}
 				}
@@ -914,10 +908,8 @@ public final class MavenGoalsView extends ViewPart
 		try
 		{
 			MavenGoal newRoot = MavenPomParser.parseProject(pomFile);
-			MavenGoal old = projects.put(key, newRoot);
+			projects.put(key, newRoot);
 			pomWatcher.remember(key, newRoot);
-			if (old != null)
-				MavenPomParser.dispose(old);
 		}
 		catch (Exception e)
 		{

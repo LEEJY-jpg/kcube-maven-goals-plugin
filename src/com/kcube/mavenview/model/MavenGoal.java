@@ -30,6 +30,8 @@ public final class MavenGoal
 	private final String[] arguments;
 	/** 이 노드가 PROJECT 루트일 때만 채워지는, 자신이 파싱된 pom.xml 파일. */
 	private final File pomFile;
+	/** 트리 구조를 유지하기 위한 자식 노드 목록. */
+	private final java.util.List<MavenGoal> children = new java.util.ArrayList<>();
 
 	/** 일반 트리 노드(Lifecycle/Plugin/Goal/Execution)를 생성한다. */
 	public MavenGoal(String name, String goal, Type type, MavenGoal parent, String... arguments)
@@ -105,6 +107,18 @@ public final class MavenGoal
 				return n.pomFile;
 		}
 		return null;
+	}
+
+	/** 자식 노드를 추가한다. */
+	public void addChild(MavenGoal child)
+	{
+		children.add(child);
+	}
+
+	/** 자식 노드 목록을 반환한다. */
+	public java.util.List<MavenGoal> getChildren()
+	{
+		return java.util.Collections.unmodifiableList(children);
 	}
 
 	/** 트리 라벨로 쓰이도록 노드 이름을 반환한다. */

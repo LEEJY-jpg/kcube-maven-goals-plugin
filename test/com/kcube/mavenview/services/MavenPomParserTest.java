@@ -148,16 +148,6 @@ class MavenPomParserTest
 	}
 
 	@Test
-	void disposeRemovesChildren() throws Exception
-	{
-		MavenGoal root = MavenPomParser.parseProject(write("pom.xml", "<project><artifactId>x</artifactId></project>"));
-		MavenGoal lifecycle = child(root, "Lifecycle");
-		MavenPomParser.dispose(root);
-		assertTrue(MavenPomParser.children(root).isEmpty());
-		assertTrue(MavenPomParser.children(lifecycle).isEmpty());
-	}
-
-	@Test
 	void rejectsDoctype() throws Exception
 	{
 		File pom = write("pom.xml", "<!DOCTYPE project [<!ENTITY x \"y\">]><project><artifactId>x</artifactId></project>");
