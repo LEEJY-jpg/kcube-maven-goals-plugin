@@ -21,6 +21,7 @@ import org.eclipse.ui.console.IConsole;
 import org.eclipse.ui.console.MessageConsole;
 import org.eclipse.ui.console.MessageConsoleStream;
 
+import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.model.MavenGoal;
 
 /**
@@ -127,11 +128,11 @@ public final class MavenExecutor
 						out.println(line);
 				}
 				int exit = process.waitFor();
-				console.newMessageStream().println("Maven finished. Exit code: " + exit);
+				console.newMessageStream().println(Messages.get("console.finished", exit));
 			}
 			catch (Exception e)
 			{
-				console.newMessageStream().println("ERROR: " + e.getMessage());
+				console.newMessageStream().println(Messages.get("console.error", e.getMessage()));
 			}
 		}, "kcube-maven-exec");
 		worker.setDaemon(true);

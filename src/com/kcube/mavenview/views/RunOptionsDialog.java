@@ -11,6 +11,7 @@ import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Shell;
 import org.eclipse.swt.widgets.Text;
 
+import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.services.RunOptions;
 
 /** goal과 실행 옵션(-DskipTests, 프로파일, 추가 인자 등)을 고른 뒤 실행하는 "Run with Options" 대화상자. */
@@ -48,7 +49,7 @@ final class RunOptionsDialog extends Dialog
 	protected void configureShell(Shell shell)
 	{
 		super.configureShell(shell);
-		shell.setText("Run with Options - " + projectName);
+		shell.setText(Messages.get("dialog.title", projectName));
 	}
 
 	/** 입력 컨트롤들을 만든다. */
@@ -60,15 +61,15 @@ final class RunOptionsDialog extends Dialog
 		c.setLayout(new GridLayout(2, false));
 		c.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
 
-		goalsText = labeledText(c, "Goals:", initialGoals);
-		profilesText = labeledText(c, "Profiles (-P):", initialOptions.profiles());
-		profilesText.setToolTipText("Comma separated, e.g. dev,local");
-		extraText = labeledText(c, "Additional args:", initialOptions.extraArgs());
-		extraText.setToolTipText("e.g. -Dfoo=bar -T 4");
+		goalsText = labeledText(c, Messages.get("dialog.goals"), initialGoals);
+		profilesText = labeledText(c, Messages.get("dialog.profiles"), initialOptions.profiles());
+		profilesText.setToolTipText(Messages.get("dialog.profiles.tooltip"));
+		extraText = labeledText(c, Messages.get("dialog.extra"), initialOptions.extraArgs());
+		extraText.setToolTipText(Messages.get("dialog.extra.tooltip"));
 
-		skipTests = check(c, "Skip tests (-DskipTests)", initialOptions.skipTests());
-		offline = check(c, "Offline (-o)", initialOptions.offline());
-		updateSnapshots = check(c, "Update snapshots (-U)", initialOptions.updateSnapshots());
+		skipTests = check(c, Messages.get("dialog.skipTests"), initialOptions.skipTests());
+		offline = check(c, Messages.get("dialog.offline"), initialOptions.offline());
+		updateSnapshots = check(c, Messages.get("dialog.update"), initialOptions.updateSnapshots());
 		return area;
 	}
 

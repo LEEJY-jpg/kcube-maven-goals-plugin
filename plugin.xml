@@ -9,14 +9,14 @@
          class="com.kcube.mavenview.views.MavenGoalsView"
          icon="icons/m2.png"
          id="com.kcube.mavenview.views.mavenGoals"
-         name="Maven Goals"
+         name="%view.name"
          restorable="true"/>
    </extension>
 
    <extension point="org.eclipse.ui.commands">
       <command
          id="com.kcube.mavenview.commands.refresh"
-         name="Refresh Maven Goals"/>
+         name="%command.refresh.name"/>
    </extension>
 
    <extension point="org.eclipse.ui.handlers">

@@ -63,6 +63,7 @@ import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 
 import com.kcube.mavenview.model.MavenGoal;
+import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.services.GoalFilter;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
@@ -243,8 +244,8 @@ public final class MavenGoalsView extends ViewPart
 		rootLayout.verticalSpacing = 0;
 		parent.setLayout(rootLayout);
 		filterBox = new Text(parent, SWT.SEARCH | SWT.ICON_SEARCH | SWT.ICON_CANCEL);
-		filterBox.setMessage("Filter goals");
-		filterBox.setToolTipText("Type a keyword to show only matching goals (Esc to clear)");
+		filterBox.setMessage(Messages.get("filter.message"));
+		filterBox.setToolTipText(Messages.get("filter.tooltip"));
 		filterBox.setLayoutData(new GridData(SWT.FILL, SWT.CENTER, true, false));
 
 		viewer = new TreeViewer(parent);
@@ -474,7 +475,7 @@ public final class MavenGoalsView extends ViewPart
 
 		// 더블클릭과 동일하게, 현재 선택된 goal을 실행한다. 다른 툴바 버튼들과 마찬가지로 항상 활성 상태이며,
 		// 실행 불가능한 노드가 선택된 경우 runSelectedGoal()이 조용히 무시한다.
-		Action run = new Action("Run")
+		Action run = new Action(Messages.get("action.run"))
 		{
 			/** 선택된 goal을 실행한다(더블클릭과 동일). */
 			@Override
@@ -483,10 +484,10 @@ public final class MavenGoalsView extends ViewPart
 				runSelectedGoal();
 			}
 		};
-		run.setToolTipText("Run the selected goal");
+		run.setToolTipText(Messages.get("action.run.tooltip"));
 		run.setImageDescriptor(AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/run.png"));
 
-		Action updateProject = new Action("Update Maven Project")
+		Action updateProject = new Action(Messages.get("action.update"))
 		{
 			/** 선택된 프로젝트에 대해 Update Maven Project를 수행한다. */
 			@Override
@@ -495,12 +496,11 @@ public final class MavenGoalsView extends ViewPart
 				updateSelectedProjects();
 			}
 		};
-		updateProject.setToolTipText(
-			"Update Maven Project: reload pom.xml and re-resolve dependencies (workspace projects only)");
+		updateProject.setToolTipText(Messages.get("action.update.tooltip"));
 		updateProject.setImageDescriptor(
 			AbstractUIPlugin.imageDescriptorFromPlugin("com.kcube.mavenview", "icons/update_dependencies.png"));
 
-		Action add = new Action("Add POM File...")
+		Action add = new Action(Messages.get("action.add"))
 		{
 			/** 파일 다이얼로그로 pom.xml을 골라 등록한다. */
 			@Override
@@ -509,10 +509,10 @@ public final class MavenGoalsView extends ViewPart
 				addPomViaDialog();
 			}
 		};
-		add.setToolTipText("Register a pom.xml from disk");
+		add.setToolTipText(Messages.get("action.add.tooltip"));
 		add.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_OBJ_ADD));
 
-		Action addFromSelection = new Action("Add from Selection")
+		Action addFromSelection = new Action(Messages.get("action.addSelection"))
 		{
 			/** 다른 뷰에서 마지막으로 선택한 리소스의 pom.xml을 등록한다. */
 			@Override
@@ -521,10 +521,10 @@ public final class MavenGoalsView extends ViewPart
 				addPomFromSelection();
 			}
 		};
-		addFromSelection.setToolTipText("Register the pom.xml of the currently selected project/resource");
+		addFromSelection.setToolTipText(Messages.get("action.addSelection.tooltip"));
 		addFromSelection.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_ETOOL_HOME_NAV));
 
-		Action remove = new Action("Remove")
+		Action remove = new Action(Messages.get("action.remove"))
 		{
 			/** 선택된 프로젝트를 등록 목록에서 제거한다. */
 			@Override
@@ -533,10 +533,10 @@ public final class MavenGoalsView extends ViewPart
 				removeSelected();
 			}
 		};
-		remove.setToolTipText("Unregister the selected build file(s)");
+		remove.setToolTipText(Messages.get("action.remove.tooltip"));
 		remove.setImageDescriptor(images.getImageDescriptor(ISharedImages.IMG_TOOL_DELETE));
 
-		Action refresh = new Action("Refresh All")
+		Action refresh = new Action(Messages.get("action.refresh"))
 		{
 			/** 등록된 모든 pom.xml을 다시 파싱한다. */
 			@Override
@@ -545,11 +545,11 @@ public final class MavenGoalsView extends ViewPart
 				refreshAll();
 			}
 		};
-		refresh.setToolTipText("Re-parse all registered pom.xml files");
+		refresh.setToolTipText(Messages.get("action.refresh.tooltip"));
 		refresh.setImageDescriptor(
 			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui.ide", "icons/full/elcl16/refresh_nav.png"));
 
-		Action expandAll = new Action("Expand All")
+		Action expandAll = new Action(Messages.get("action.expandAll"))
 		{
 			/** 선택된 노드 하위(없으면 트리 전체)를 모두 펼친다. */
 			@Override
@@ -563,11 +563,11 @@ public final class MavenGoalsView extends ViewPart
 					viewer.expandAll();
 			}
 		};
-		expandAll.setToolTipText("Expand All");
+		expandAll.setToolTipText(Messages.get("action.expandAll"));
 		expandAll.setImageDescriptor(
 			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui", "icons/full/elcl16/expandall.png"));
 
-		Action collapseAll = new Action("Collapse All")
+		Action collapseAll = new Action(Messages.get("action.collapseAll"))
 		{
 			/** 트리 전체를 접는다. */
 			@Override
@@ -576,7 +576,7 @@ public final class MavenGoalsView extends ViewPart
 				viewer.collapseAll();
 			}
 		};
-		collapseAll.setToolTipText("Collapse All");
+		collapseAll.setToolTipText(Messages.get("action.collapseAll"));
 		collapseAll.setImageDescriptor(
 			AbstractUIPlugin.imageDescriptorFromPlugin("org.eclipse.ui", "icons/full/elcl16/collapseall.png"));
 
@@ -597,8 +597,7 @@ public final class MavenGoalsView extends ViewPart
 				Button checkbox = new Button(holder, SWT.CHECK);
 				checkbox.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, true));
 				checkbox.setText("mvn");
-				checkbox.setToolTipText(
-					"Checked: run the external mvn on PATH. Unchecked: use Eclipse's embedded Maven (m2e).");
+				checkbox.setToolTipText(Messages.get("action.mvn.tooltip"));
 				checkbox.setSelection(useExternalMvn);
 				checkbox.addSelectionListener(SelectionListener.widgetSelectedAdapter(e -> {
 					useExternalMvn = checkbox.getSelection();
@@ -863,7 +862,7 @@ public final class MavenGoalsView extends ViewPart
 				return;
 			if (g.getGoal() != null)
 			{
-				m.add(new Action("Run")
+				m.add(new Action(Messages.get("menu.run"))
 				{
 					@Override
 					public void run()
@@ -874,7 +873,7 @@ public final class MavenGoalsView extends ViewPart
 			}
 			if (g.getGoal() != null || g.getType() == MavenGoal.Type.PROJECT)
 			{
-				m.add(new Action("Run with Options...")
+				m.add(new Action(Messages.get("menu.runWithOptions"))
 				{
 					@Override
 					public void run()
@@ -885,7 +884,7 @@ public final class MavenGoalsView extends ViewPart
 			}
 			if (g.getGoal() != null)
 			{
-				m.add(new Action(isFavorite(g) ? "Remove from Favorites" : "Add to Favorites")
+				m.add(new Action(isFavorite(g) ? Messages.get("favorites.remove") : Messages.get("favorites.add"))
 				{
 					@Override
 					public void run()
@@ -901,7 +900,7 @@ public final class MavenGoalsView extends ViewPart
 	/** 툴바의 즐겨찾기/최근 실행 드롭다운 버튼을 만든다. 항목을 고르면 바로 실행한다. */
 	private Action createFavoritesAction()
 	{
-		Action action = new Action("Favorites / Recent", IAction.AS_DROP_DOWN_MENU)
+		Action action = new Action(Messages.get("favorites.action"), IAction.AS_DROP_DOWN_MENU)
 		{
 			@Override
 			public void run()
@@ -909,7 +908,7 @@ public final class MavenGoalsView extends ViewPart
 				// 버튼 본체 클릭은 아무 동작도 하지 않는다(드롭다운 화살표로만 사용).
 			}
 		};
-		action.setToolTipText("Favorite and recently run goals");
+		action.setToolTipText(Messages.get("favorites.tooltip"));
 		action.setImageDescriptor(PlatformUI.getWorkbench().getSharedImages().getImageDescriptor(
 			ISharedImages.IMG_OBJS_INFO_TSK));
 		action.setMenuCreator(new IMenuCreator()
@@ -948,7 +947,7 @@ public final class MavenGoalsView extends ViewPart
 	{
 		if (favorites.isEmpty() && recents.isEmpty())
 		{
-			Action empty = new Action("(No favorites or recent goals)")
+			Action empty = new Action(Messages.get("favorites.empty"))
 			{
 			};
 			empty.setEnabled(false);
@@ -982,7 +981,7 @@ public final class MavenGoalsView extends ViewPart
 		if (!recents.isEmpty())
 		{
 			manager.add(new Separator());
-			manager.add(new Action("Clear Recent")
+			manager.add(new Action(Messages.get("favorites.clearRecent"))
 			{
 				@Override
 				public void run()
@@ -1013,8 +1012,8 @@ public final class MavenGoalsView extends ViewPart
 	private void addPomViaDialog()
 	{
 		FileDialog dialog = new FileDialog(viewer.getControl().getShell(), SWT.OPEN | SWT.MULTI);
-		dialog.setText("Select pom.xml file(s)");
-		dialog.setFilterNames(new String[] {"Maven POM (pom.xml)", "All files"});
+		dialog.setText(Messages.get("fileDialog.title"));
+		dialog.setFilterNames(new String[] {Messages.get("fileDialog.pomFilter"), Messages.get("fileDialog.allFiles")});
 		dialog.setFilterExtensions(new String[] {"pom.xml;*.xml", "*.*"});
 		IPath workspaceLocation = ResourcesPlugin.getWorkspace().getRoot().getLocation();
 		if (workspaceLocation != null)

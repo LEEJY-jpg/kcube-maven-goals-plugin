@@ -36,14 +36,16 @@ if [ "${1:-}" = "--test" ]; then
 	JUNIT_CP="$(find "$ECLIPSE_HOME/plugins" \( -name 'org.junit.jupiter.*.jar' -o -name 'org.junit.platform.*.jar' -o -name 'org.opentest4j_*.jar' -o -name 'org.apiguardian_*.jar' \) -size +0 | tr '\n' ':')"
 	echo "compile main + test ..."
 	"$JAVAC" --release 17 -encoding UTF-8 -cp "$CP$JUNIT_CP" -d "$BUILD" $(find src test -name '*.java')
+	(cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
 	"${JAVA_HOME:+$JAVA_HOME/bin/}java" -cp "$BUILD:$CP$JUNIT_CP" com.kcube.mavenview.services.TestRunner
 	exit $?
 fi
 echo "compile (--release 17) ..."
 "$JAVAC" --release 17 -encoding UTF-8 -cp "$CP" -d "$BUILD" $(find src -name '*.java')
-cp -R icons "$BUILD/icons"; cp plugin.xml "$BUILD/"
+cp -R icons "$BUILD/icons"; cp plugin.xml plugin*.properties "$BUILD/"
+(cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
 mkdir -p dist
-"$JAR" --create --file "$OUT" --manifest META-INF/MANIFEST.MF -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml
+"$JAR" --create --file "$OUT" --manifest META-INF/MANIFEST.MF -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties
 echo "built: $OUT"
 
 if [ "${1:-}" = "--install" ]; then
