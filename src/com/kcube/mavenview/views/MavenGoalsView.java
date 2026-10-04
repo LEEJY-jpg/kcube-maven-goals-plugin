@@ -76,6 +76,7 @@ import com.kcube.mavenview.services.GoalHistory;
 import com.kcube.mavenview.services.GoalLabels;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
+import com.kcube.mavenview.services.PomWatcher;
 import com.kcube.mavenview.services.PomScanner;
 import com.kcube.mavenview.services.RunOptions;
 
@@ -129,6 +130,13 @@ public final class MavenGoalsView extends ViewPart
 	private boolean useExternalMvn;
 	/** 즐겨찾기와 최근 실행 목록. */
 	private final GoalHistory history = new GoalHistory();
+
+	/** 등록된 pom.xml이 외부에서 수정됐는지 주기적으로 확인한다. */
+	private final PomWatcher pomWatcher = new PomWatcher();
+
+	private static final int POM_WATCH_INTERVAL_MS = 2000;
+
+	private Runnable pomWatchTask;
 	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
 	private IMemento savedState;
 	private Text filterBox;
@@ -379,6 +387,76 @@ public final class MavenGoalsView extends ViewPart
 		loadRegisteredPoms();
 		pruneMissingPoms();
 		restoreState();
+		startPomWatch();
+	}
+
+	/** 뷰가 보이는 동안 2초마다 등록된 pom의 수정 여부를 확인해, 바뀐 프로젝트만 다시 파싱한다. */
+	private void startPomWatch()
+	{
+		pomWatchTask = new Runnable()
+		{
+			@Override
+			public void run()
+			{
+				if (viewer == null || viewer.getControl().isDisposed())
+					return;
+				try
+				{
+					if (getSite().getPage().isPartVisible(MavenGoalsView.this))
+						reloadChangedPoms();
+				}
+				catch (RuntimeException e)
+				{
+					log(IStatus.WARNING, "Failed to check pom changes", e);
+				}
+				viewer.getControl().getDisplay().timerExec(POM_WATCH_INTERVAL_MS, this);
+			}
+		};
+		viewer.getControl().getDisplay().timerExec(POM_WATCH_INTERVAL_MS, pomWatchTask);
+	}
+
+	/** 파일이 바뀐 프로젝트만 다시 파싱한다. 펼침 상태는 유지한다. */
+	private void reloadChangedPoms()
+	{
+		List<String> changed = pomWatcher.changed(projects);
+		if (changed.isEmpty())
+			return;
+		reparseKeepingExpansion(changed);
+	}
+
+	/** 지정한 프로젝트들을 다시 파싱하고 트리를 갱신하되, 갱신 전에 펼쳐져 있던 노드는 다시 펼친다. */
+	private void reparseKeepingExpansion(List<String> keys)
+	{
+		java.util.Set<String> expanded = new java.util.HashSet<>();
+		for (Object o : viewer.getExpandedElements())
+		{
+			if (o instanceof MavenGoal g)
+			{
+				String path = g.getType() == MavenGoal.Type.PROJECT ? key(g.getPomFile()) + PATH_NODE_SEP : nodePath(g);
+				if (path != null)
+					expanded.add(path);
+			}
+		}
+		for (String k : keys)
+			reparse(new File(k));
+		viewer.getControl().setRedraw(false);
+		try
+		{
+			viewer.refresh();
+			java.util.List<MavenGoal> toExpand = new ArrayList<>();
+			for (MavenGoal root : projects.values())
+				collectExpanded(root, expanded, toExpand);
+			viewer.setExpandedElements(toExpand.toArray());
+			for (MavenGoal root : projects.values())
+			{
+				if (toExpand.contains(root))
+					viewer.expandToLevel(root, 2);
+			}
+		}
+		finally
+		{
+			viewer.getControl().setRedraw(true);
+		}
 	}
 
 	/** 뷰가 닫힐 때 외부 선택 추적 리스너를 해제한다. */
@@ -386,6 +464,8 @@ public final class MavenGoalsView extends ViewPart
 	public void dispose()
 	{
 		getSite().getWorkbenchWindow().getSelectionService().removeSelectionListener(externalSelectionTracker);
+		if (pomWatchTask != null && viewer != null && !viewer.getControl().isDisposed())
+			viewer.getControl().getDisplay().timerExec(-1, pomWatchTask);
 		if (pendingFilter != null && viewer != null && !viewer.getControl().isDisposed())
 			viewer.getControl().getDisplay().timerExec(-1, pendingFilter);
 		super.dispose();
@@ -865,6 +945,7 @@ public final class MavenGoalsView extends ViewPart
 			if (!new File(path).isFile())
 			{
 				MavenGoal old = projects.remove(path);
+				pomWatcher.forget(path);
 				if (old != null)
 					MavenPomParser.dispose(old);
 				projectsChanged = true;
@@ -1259,6 +1340,7 @@ public final class MavenGoalsView extends ViewPart
 					String key = key(g.resolvePomFile());
 					if (projects.remove(key) != null)
 					{
+						pomWatcher.forget(key);
 						MavenPomParser.dispose(g);
 						changed = true;
 					}
@@ -1278,11 +1360,7 @@ public final class MavenGoalsView extends ViewPart
 	public void refreshAll()
 	{
 		pruneMissingPoms();
-		for (String path : new java.util.ArrayList<>(projects.keySet()))
-		{
-			reparse(new File(path));
-		}
-		viewer.refresh();
+		reparseKeepingExpansion(new java.util.ArrayList<>(projects.keySet()));
 	}
 
 	/** 새 pom.xml 하나를 파싱해 등록하고, 트리를 갱신한 뒤 Lifecycle/Plugins까지 펼쳐 보여준다. */
@@ -1302,6 +1380,7 @@ public final class MavenGoalsView extends ViewPart
 		{
 			MavenGoal newRoot = MavenPomParser.parseProject(pomFile);
 			MavenGoal old = projects.put(key, newRoot);
+			pomWatcher.remember(key, newRoot);
 			if (old != null)
 				MavenPomParser.dispose(old);
 		}
