@@ -27,6 +27,8 @@ import org.eclipse.jface.resource.JFaceResources;
 import org.eclipse.jface.viewers.AbstractTreeViewer;
 import org.eclipse.jface.viewers.IFontProvider;
 import org.eclipse.jface.viewers.ISelection;
+import org.eclipse.jface.viewers.ITreeViewerListener;
+import org.eclipse.jface.viewers.TreeExpansionEvent;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.ITreeContentProvider;
 import org.eclipse.jface.viewers.LabelProvider;
@@ -215,6 +217,12 @@ public final class MavenGoalsView extends ViewPart
 		{
 			viewer.collapseAll();
 			viewer.setExpandedElements(toExpand.toArray());
+			// 저장 당시 접혀 있었더라도 펼쳐 둔 프로젝트의 2단계 노드는 항상 펼친다.
+			for (MavenGoal root : projects.values())
+			{
+				if (toExpand.contains(root))
+					viewer.expandToLevel(root, 2);
+			}
 		}
 		finally
 		{
@@ -303,11 +311,34 @@ public final class MavenGoalsView extends ViewPart
 				&& g.getGoal() == null
 				&& !MavenPomParser.children(g).isEmpty())
 			{
-				viewer.setExpandedState(g, !viewer.getExpandedState(g));
+				// 2단계 노드(Lifecycle/Plugins/Modules)는 닫히지 않으므로 토글하지 않고 펼친 상태를 유지한다.
+				viewer.setExpandedState(g, isLevel2(g) || !viewer.getExpandedState(g));
 			}
 			else
 			{
 				runSelectedGoal();
+			}
+		});
+		// 사용자가 2단계 노드를 접으려 하면(화살표 클릭, 키보드 등) 곧바로 다시 펼친다.
+		viewer.addTreeListener(new ITreeViewerListener()
+		{
+			/** 2단계 노드가 접히면 이벤트 처리가 끝난 뒤 다시 펼친다. */
+			@Override
+			public void treeCollapsed(TreeExpansionEvent event)
+			{
+				if (event.getElement() instanceof MavenGoal g && isLevel2(g))
+				{
+					viewer.getControl().getDisplay().asyncExec(() -> {
+						if (!viewer.getControl().isDisposed())
+							viewer.setExpandedState(g, true);
+					});
+				}
+			}
+
+			/** 펼칠 때는 할 일이 없다. */
+			@Override
+			public void treeExpanded(TreeExpansionEvent event)
+			{
 			}
 		});
 		viewer.addFilter(new ViewerFilter()
@@ -378,8 +409,7 @@ public final class MavenGoalsView extends ViewPart
 			viewer.refresh();
 			if (filterText.isEmpty())
 			{
-				viewer.collapseAll();
-				viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+				collapseToLevel2();
 			}
 			else if (visibleNodes().size() <= MAX_AUTO_EXPAND_NODES)
 			{
@@ -395,6 +425,20 @@ public final class MavenGoalsView extends ViewPart
 		{
 			viewer.getControl().setRedraw(true);
 		}
+	}
+
+	/** 모든 노드를 접은 뒤 프로젝트와 2단계 노드까지만 다시 펼친다. 2단계 노드는 접힌 상태로 남지 않는다. */
+	private void collapseToLevel2()
+	{
+		viewer.collapseAll();
+		viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+	}
+
+	/** 프로젝트 바로 아래의 폴더 노드(Lifecycle/Plugins/Modules)인지 확인한다. 이 노드들은 접을 수 없다. */
+	private static boolean isLevel2(MavenGoal g)
+	{
+		return g.getParent() != null && g.getParent().getType() == MavenGoal.Type.PROJECT
+			&& g.getType() != MavenGoal.Type.PROJECT;
 	}
 
 	/** 현재 검색어에 대해 보여줄 노드 집합을 반환한다. 필요할 때 한 번만 계산해 캐시한다. */
@@ -570,11 +614,11 @@ public final class MavenGoalsView extends ViewPart
 
 		Action collapseAll = new Action(Messages.get("action.collapseAll"))
 		{
-			/** 트리 전체를 접는다. */
+			/** 3단계 이하를 접는다. 프로젝트와 2단계 노드(Lifecycle/Plugins/Modules)는 펼친 상태로 둔다. */
 			@Override
 			public void run()
 			{
-				viewer.collapseAll();
+				collapseToLevel2();
 			}
 		};
 		collapseAll.setToolTipText(Messages.get("action.collapseAll"));
