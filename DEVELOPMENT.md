@@ -24,7 +24,7 @@ src/com/kcube/mavenview/
   views/MavenGoalsView.java      뷰 UI, 툴바, 등록 목록 관리
   views/SelectionTracker.java, PomDropSupport.java   선택 추적, 드래그 앤 드롭
   services/PomRegistryStore.java, PomWatcher.java    등록 목록 저장, pom 변경 감지
-  handlers/RefreshHandler.java   커맨드(M5+R) → 전체 새로고침
+  handlers/RefreshHandler.java   커맨드(Cmd/Ctrl+Shift+F5) → 전체 새로고침
 ```
 
 ## 주요 기능 및 변경 이력
