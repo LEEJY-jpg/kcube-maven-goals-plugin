@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.kcube</groupId>
     <artifactId>kcube-maven-goals-plugin-parent</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>1.0.0</version>
     <packaging>pom</packaging>
     <name>KCube Maven Goals (parent)</name>
 
