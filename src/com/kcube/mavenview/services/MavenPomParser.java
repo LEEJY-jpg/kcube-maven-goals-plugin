@@ -53,6 +53,18 @@ public final class MavenPomParser
 	/** pom.xml을 파싱해 Lifecycle/Plugins를 자식으로 가진 PROJECT 루트 노드를 만든다. */
 	public static MavenGoal parseProject(File pom) throws Exception
 	{
+		return parseProject(pom, null, new java.util.HashSet<>());
+	}
+
+	/**
+	 * pom.xml을 파싱한다. {@code <modules>}가 있으면 하위 모듈 pom도 재귀적으로 파싱해 "Modules" 노드 아래에 PROJECT로 매단다.
+	 *
+	 * @param parent 상위 프로젝트 노드(최상위면 null)
+	 * @param visited 이미 파싱한 pom의 정규 경로. 순환 참조로 무한 재귀하는 것을 막는다.
+	 */
+	private static MavenGoal parseProject(File pom, MavenGoal parent, java.util.Set<String> visited) throws Exception
+	{
+		visited.add(pom.getCanonicalPath());
 		DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
 		f.setNamespaceAware(false);
 		try
@@ -71,7 +83,7 @@ public final class MavenPomParser
 		if (name == null || name.isBlank())
 			name = pom.getParentFile().getName();
 
-		MavenGoal projectRoot = new MavenGoal(name, pom);
+		MavenGoal projectRoot = parent == null ? new MavenGoal(name, pom) : new MavenGoal(name, pom, parent);
 
 		MavenGoal lifecycle = new MavenGoal("Lifecycle", null, MavenGoal.Type.LIFECYCLE, projectRoot);
 		addChild(projectRoot, lifecycle);
@@ -84,7 +96,57 @@ public final class MavenPomParser
 		addChild(projectRoot, plugins);
 		parsePlugins(plugins, project.getElementsByTagName("plugin"));
 
+		parseModules(projectRoot, pom, project, visited);
+
 		return projectRoot;
+	}
+
+	/** {@code <modules><module>}에 선언된 하위 모듈 pom을 읽어 "Modules" 노드 아래에 추가한다. 읽을 수 없는 모듈은 건너뛴다. */
+	private static void parseModules(MavenGoal projectRoot, File pom, Element project, java.util.Set<String> visited)
+	{
+		Element modules = directChild(project, "modules");
+		if (modules == null)
+			return;
+		MavenGoal folder = new MavenGoal("Modules", null, MavenGoal.Type.MODULES, projectRoot);
+		for (Element m : directChildren(modules, "module"))
+		{
+			String path = m.getTextContent() == null ? "" : m.getTextContent().trim();
+			if (path.isEmpty())
+				continue;
+			File modulePom = new File(pom.getParentFile(), path);
+			if (modulePom.isDirectory())
+				modulePom = new File(modulePom, "pom.xml");
+			try
+			{
+				if (modulePom.isFile() && !visited.contains(modulePom.getCanonicalPath()))
+					addChild(folder, parseProject(modulePom, folder, visited));
+			}
+			catch (Exception ignored)
+			{
+				// 깨진 모듈 pom 하나 때문에 전체 트리를 포기하지 않는다.
+			}
+		}
+		if (!children(folder).isEmpty())
+			addChild(projectRoot, folder);
+	}
+
+	/** parent의 직접 자식 중 이름이 tag인 첫 엘리먼트를 반환한다. 없으면 null. */
+	private static Element directChild(Element parent, String tag)
+	{
+		List<Element> found = directChildren(parent, tag);
+		return found.isEmpty() ? null : found.get(0);
+	}
+
+	/** parent의 직접 자식 중 이름이 tag인 엘리먼트들을 반환한다. */
+	private static List<Element> directChildren(Element parent, String tag)
+	{
+		List<Element> result = new java.util.ArrayList<>();
+		for (org.w3c.dom.Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
+		{
+			if (n instanceof Element e && tag.equals(e.getTagName()))
+				result.add(e);
+		}
+		return result;
 	}
 
 	/** pom.xml의 모든 {@code <plugin>} 선언을 읽어 "Plugins" 노드 아래에 플러그인별 하위 트리를 만든다. */
@@ -126,13 +188,13 @@ public final class MavenPomParser
 		}
 	}
 
-	/** 주어진 엘리먼트 바로 아래의 {@code <tag>} 자식 텍스트를 읽는다. 없으면 null. */
+	/** 주어진 엘리먼트 바로 아래의 {@code <tag>} 자식 텍스트를 읽는다. 없으면 null. (손자 이후의 같은 이름 태그는 무시한다.) */
 	private static String text(Element parent, String tag)
 	{
-		NodeList n = parent.getElementsByTagName(tag);
-		if (n.getLength() == 0)
+		Element e = directChild(parent, tag);
+		if (e == null)
 			return null;
-		String s = n.item(0).getTextContent();
+		String s = e.getTextContent();
 		return s == null ? null : s.trim();
 	}
 

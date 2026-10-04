@@ -33,6 +33,7 @@ import org.eclipse.jface.viewers.LabelProvider;
 import org.eclipse.jface.viewers.TreeViewer;
 import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.jface.viewers.ViewerFilter;
+import org.eclipse.jface.window.Window;
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.dnd.DND;
 import org.eclipse.swt.dnd.DropTarget;
@@ -62,8 +63,10 @@ import org.eclipse.ui.part.ViewPart;
 import org.eclipse.ui.plugin.AbstractUIPlugin;
 
 import com.kcube.mavenview.model.MavenGoal;
+import com.kcube.mavenview.services.GoalFilter;
 import com.kcube.mavenview.services.MavenExecutor;
 import com.kcube.mavenview.services.MavenPomParser;
+import com.kcube.mavenview.services.RunOptions;
 
 /**
  * Maven lifecycle phase/plugin goal을 트리로 보여주는 뷰 본체.
@@ -80,6 +83,11 @@ public final class MavenGoalsView extends ViewPart
 	private static final String PREF_USE_EXTERNAL_MVN = "useExternalMvn";
 	private static final String PREF_FAVORITES = "favoriteGoals";
 	private static final String PREF_RECENT = "recentGoals";
+	private static final String PREF_OPT_SKIP_TESTS = "runOptions.skipTests";
+	private static final String PREF_OPT_OFFLINE = "runOptions.offline";
+	private static final String PREF_OPT_UPDATE = "runOptions.updateSnapshots";
+	private static final String PREF_OPT_PROFILES = "runOptions.profiles";
+	private static final String PREF_OPT_EXTRA = "runOptions.extraArgs";
 	/** 즐겨찾기/최근 실행 항목 안에서 pom 경로와 goal 문자열을 구분하는 문자. */
 	private static final String ENTRY_SEP = "\t";
 	/** 최근 실행 목록에 보관할 최대 개수. */
@@ -106,8 +114,8 @@ public final class MavenGoalsView extends ViewPart
 	private static final int PLUGIN_EXPAND_DEPTH = 3;
 	/** 현재 검색어 기준으로 트리에 보여줄 노드 집합(identity). null이면 다시 계산해야 한다는 뜻. */
 	private java.util.Set<MavenGoal> visibleNodes;
-	/** 노드별 소문자 검색 키(이름 + goal + 인자). 노드는 불변이므로 한 번만 만들어 재사용한다. */
-	private final java.util.Map<MavenGoal, String> searchKeys = new java.util.WeakHashMap<>();
+	/** 검색어에 맞는 노드를 계산하는 로직. */
+	private final GoalFilter goalFilter = new GoalFilter();
 	/** 예약돼 있는(아직 실행 전인) 필터 적용 작업. 새 입력이 오면 취소하고 다시 예약한다. */
 	private Runnable pendingFilter;
 	/** true면 외부 mvn 프로세스로, false면 Eclipse 내장 Maven(m2e)으로 goal을 실행한다. 툴바 체크박스와 연동. */
@@ -391,55 +399,8 @@ public final class MavenGoalsView extends ViewPart
 	private java.util.Set<MavenGoal> visibleNodes()
 	{
 		if (visibleNodes == null)
-		{
-			java.util.Set<MavenGoal> result = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-			for (MavenGoal root : projects.values())
-				collectVisible(root, false, result);
-			visibleNodes = result;
-		}
+			visibleNodes = goalFilter.visibleNodes(projects.values(), filterText);
 		return visibleNodes;
-	}
-
-	/**
-	 * 트리를 한 번만 순회하며 보여줄 노드를 result에 모은다. 노드는 자신이 일치하거나, 조상 중 하나가 일치하거나,
-	 * 후손 중 하나가 일치하면 보인다. (PROJECT 노드 이름은 매칭 대상이 아니다.)
-	 *
-	 * @return 이 노드가 보이면 true
-	 */
-	private boolean collectVisible(MavenGoal node, boolean ancestorMatched, java.util.Set<MavenGoal> result)
-	{
-		boolean matchedHere = ancestorMatched || selfMatches(node);
-		boolean descendantMatched = false;
-		for (MavenGoal child : MavenPomParser.children(node))
-		{
-			descendantMatched |= collectVisible(child, matchedHere, result);
-		}
-		boolean visible = matchedHere || descendantMatched;
-		if (visible)
-			result.add(node);
-		return visible;
-	}
-
-	/** 표시 이름, 실행 문자열(goal), 플러그인 groupId/artifactId 중 하나라도 검색어를 포함하는지 본다. */
-	private boolean selfMatches(MavenGoal g)
-	{
-		if (g.getType() == MavenGoal.Type.PROJECT)
-			return false;
-		return searchKeys.computeIfAbsent(g, MavenGoalsView::buildSearchKey).contains(filterText);
-	}
-
-	/** 노드의 이름, goal, 인자를 줄바꿈으로 이어 붙인 소문자 검색 키를 만든다. 검색어에는 줄바꿈이 없으므로 필드 경계를 넘는 오탐은 없다. */
-	private static String buildSearchKey(MavenGoal g)
-	{
-		StringBuilder key = new StringBuilder(g.getName());
-		if (g.getGoal() != null)
-			key.append('\n').append(g.getGoal());
-		for (String arg : g.getArguments())
-		{
-			if (arg != null)
-				key.append('\n').append(arg);
-		}
-		return key.toString().toLowerCase();
 	}
 
 	/** Finder/Project Explorer 등에서 pom.xml 또는 프로젝트 폴더를 뷰로 끌어다 놓으면 자동 등록한다. */
@@ -854,15 +815,53 @@ public final class MavenGoalsView extends ViewPart
 		MavenExecutor.run(pom, entryGoal(entry), useExternalMvn);
 	}
 
+	/** 대화상자로 goal과 옵션을 정해 실행한다. PROJECT 노드는 기본 goal로 "clean install"을 제안한다. 사용한 옵션은 다음 실행을 위해 저장한다. */
+	private void runWithOptions(MavenGoal g)
+	{
+		File pom = g.resolvePomFile();
+		if (pom == null)
+			return;
+		IEclipsePreferences prefs = InstanceScope.INSTANCE.getNode(PREFS_NODE);
+		RunOptions last = new RunOptions(
+			prefs.getBoolean(PREF_OPT_SKIP_TESTS, false),
+			prefs.getBoolean(PREF_OPT_OFFLINE, false),
+			prefs.getBoolean(PREF_OPT_UPDATE, false),
+			prefs.get(PREF_OPT_PROFILES, ""),
+			prefs.get(PREF_OPT_EXTRA, ""));
+		String initialGoals = g.getType() == MavenGoal.Type.PROJECT ? "clean install" : MavenExecutor.goalString(g);
+		RunOptionsDialog dialog = new RunOptionsDialog(viewer.getControl().getShell(), g.getName(), initialGoals, last);
+		if (dialog.open() != Window.OK)
+			return;
+		RunOptions chosen = dialog.getOptions();
+		prefs.putBoolean(PREF_OPT_SKIP_TESTS, chosen.skipTests());
+		prefs.putBoolean(PREF_OPT_OFFLINE, chosen.offline());
+		prefs.putBoolean(PREF_OPT_UPDATE, chosen.updateSnapshots());
+		prefs.put(PREF_OPT_PROFILES, chosen.profiles());
+		prefs.put(PREF_OPT_EXTRA, chosen.extraArgs());
+		try
+		{
+			prefs.flush();
+		}
+		catch (Exception ex)
+		{
+			log(IStatus.WARNING, "Failed to persist run options", ex);
+		}
+		String commandLine = dialog.getCommandLine();
+		if (commandLine.isEmpty())
+			return;
+		addRecent(key(pom) + ENTRY_SEP + commandLine);
+		MavenExecutor.run(pom, commandLine, useExternalMvn);
+	}
+
 	/** 트리 우클릭 메뉴: 실행 가능한 노드에 대해 Run과 즐겨찾기 추가/해제를 제공한다. */
 	private void hookContextMenu()
 	{
 		MenuManager manager = new MenuManager();
 		manager.setRemoveAllWhenShown(true);
 		manager.addMenuListener(m -> {
-			if (viewer.getSelection() instanceof IStructuredSelection ss
-				&& ss.getFirstElement() instanceof MavenGoal g
-				&& g.getGoal() != null)
+			if (!(viewer.getSelection() instanceof IStructuredSelection ss) || !(ss.getFirstElement() instanceof MavenGoal g))
+				return;
+			if (g.getGoal() != null)
 			{
 				m.add(new Action("Run")
 				{
@@ -872,6 +871,20 @@ public final class MavenGoalsView extends ViewPart
 						runSelectedGoal();
 					}
 				});
+			}
+			if (g.getGoal() != null || g.getType() == MavenGoal.Type.PROJECT)
+			{
+				m.add(new Action("Run with Options...")
+				{
+					@Override
+					public void run()
+					{
+						runWithOptions(g);
+					}
+				});
+			}
+			if (g.getGoal() != null)
+			{
 				m.add(new Action(isFavorite(g) ? "Remove from Favorites" : "Add to Favorites")
 				{
 					@Override

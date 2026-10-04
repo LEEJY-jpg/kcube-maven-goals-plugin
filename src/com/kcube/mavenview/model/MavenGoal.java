@@ -12,11 +12,11 @@ public final class MavenGoal
 {
 	/**
 	 * 트리 노드의 종류. PROJECT=등록된 pom.xml 하나, LIFECYCLE="Lifecycle" 폴더, PLUGIN="Plugins" 폴더 또는 개별 플러그인, GOAL=lifecycle
-	 * phase, EXECUTION=plugin execution의 goal.
+	 * phase, EXECUTION=plugin execution의 goal, MODULES="Modules" 폴더(멀티 모듈 pom의 하위 모듈 PROJECT들을 담는다).
 	 */
 	public enum Type
 	{
-		PROJECT, LIFECYCLE, PLUGIN, GOAL, EXECUTION
+		PROJECT, LIFECYCLE, PLUGIN, GOAL, EXECUTION, MODULES
 	}
 
 	/** 트리에 표시되는 이름(라벨). */
@@ -41,6 +41,12 @@ public final class MavenGoal
 	public MavenGoal(String name, File pomFile)
 	{
 		this(name, null, Type.PROJECT, null, pomFile);
+	}
+
+	/** 멀티 모듈 pom의 하위 모듈 PROJECT 노드를 생성한다. 상위 프로젝트 쪽 노드를 부모로 갖는다. */
+	public MavenGoal(String name, File pomFile, MavenGoal parent)
+	{
+		this(name, null, Type.PROJECT, parent, pomFile);
 	}
 
 	/** 모든 public 생성자가 공통으로 사용하는 내부 생성자. 필드를 초기화하고 arguments는 방어적으로 복사해 보관한다. */

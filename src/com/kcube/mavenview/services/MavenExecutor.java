@@ -73,7 +73,7 @@ public final class MavenExecutor
 			ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
 			ILaunchConfigurationType type = launchManager.getLaunchConfigurationType(
 				MavenLaunchConstants.LAUNCH_CONFIGURATION_TYPE_ID);
-			String name = launchManager.generateLaunchConfigurationName("Maven - " + goalString);
+			String name = launchManager.generateLaunchConfigurationName("Maven - " + goalString.replaceAll("[\\\\/]", "_"));
 			ILaunchConfigurationWorkingCopy wc = type.newInstance(null, name);
 			wc.setAttribute(MavenLaunchConstants.ATTR_POM_DIR, pom.getParentFile().getAbsolutePath());
 			wc.setAttribute(MavenLaunchConstants.ATTR_GOALS, goalString);
@@ -104,7 +104,8 @@ public final class MavenExecutor
 				command.add(findMaven(loginShellPath));
 				command.add("-f");
 				command.add(pom.getAbsolutePath());
-				command.add(goalString);
+				// goalString은 "clean install -DskipTests"처럼 옵션이 섞인 명령행일 수 있어 인자별로 나눠 전달한다.
+				command.addAll(RunOptions.tokenize(goalString));
 
 				ProcessBuilder pb = new ProcessBuilder(command);
 				pb.directory(pom.getParentFile());
