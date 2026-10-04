@@ -4,6 +4,7 @@ Bundle-Name: %bundleName
 Bundle-Localization: plugin
 Bundle-SymbolicName: com.kcube.mavenview;singleton:=true
 Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: KCube
 Bundle-RequiredExecutionEnvironment: JavaSE-17
 Require-Bundle: org.eclipse.ui,
  org.eclipse.core.runtime,
