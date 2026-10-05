@@ -20,6 +20,11 @@ Requires Eclipse 2023-09 or later with m2e (included in most Eclipse packages) a
 3. Select **KCube Maven Tools** > **KCube Maven Goals**, then finish and restart Eclipse.
 4. Open Window > Show View > Other... > **Maven Goals**.
 
+> **Note:** The plug-in is not code-signed, so Eclipse shows a "Trust Artifacts" dialog
+> ("Do you trust unsigned content of unknown origin?") during installation.
+> Select the `com.kcube.mavenview` entries and click **Trust Selected** to continue.
+> You do not need to check "Always trust all content".
+
 > **Tip:** If the install tries to download hundreds of unrelated bundles or fails with
 > "Can't download artifact ...", uncheck
 > **"Contact all update sites during install to find required software"** in the install dialog.
