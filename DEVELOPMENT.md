@@ -150,6 +150,12 @@ src/com/kcube/mavenview/
 - `ViewToolbar`(views): 툴바 버튼/체크박스 정의(동작은 `Handler`로 뷰에 위임). `MavenProjectUpdater`: Update Maven Project. `PomAdder`: Add POM File / Add from Selection 대화상자 흐름.
 - 결과적으로 `MavenGoalsView`는 약 1,040줄(트리 구성, 필터, 실행, 즐겨찾기 메뉴 중심).
 
+### 18. execution 라벨을 mvn 명령행 형태로 통일
+- 트리의 execution 노드를 `id:goal`(예: `js:run`) 대신 터미널에서 치는 `접두사:goal@executionId`(예: `antrun:run@js`)로 표시. id가 없으면 `antrun:run`.
+- 접두사는 `MavenPomParser.pluginPrefix`가 artifactId에서 구한다: `maven-X-plugin`, `X-maven-plugin`은 `X`, 그 외는 artifactId 그대로.
+- 히스토리·즐겨찾기 라벨(`GoalLabels.shorten`)도 같은 규칙을 써서 트리와 모양이 어긋나지 않게 함(기존 `antrun › js:run` 형태 폐지).
+- 실행 문자열(`group:artifact:goal@id`)은 그대로이며 표시 이름만 바뀐다. 노드 이름이 바뀌므로 저장된 execution 노드의 펼침 상태는 한 번 초기화된다.
+
 ## 현재 Require-Bundle 의존성
 
 ```
@@ -170,6 +176,8 @@ org.eclipse.m2e.core.ui     (Update Maven Project)
 - 번들 버전이 항상 `1.0.0.qualifier`라서, `dropins/` 아래에 같은 번들이 **두 군데**(예: `dropins/com.kcube.mavenview_1.0.0.jar` 와 `dropins/com.kcube.mavenview/eclipse/plugins/...jar`) 있으면 Eclipse는 둘 중 하나(여기서는 오래된 쪽)만 로드하고 새로 배포한 jar는 무시한다.
 - 실제 사례: Run 버튼이 몇 차례 재빌드/재시작에도 나타나지 않았는데, 코드·아이콘 문제가 아니라 `bundles.info`가 가리키는 12:17 빌드의 옛 jar가 계속 로드되고 있었음. 옛 폴더를 `dropins` 밖으로 치우자 즉시 해결됨.
 - 확인 방법: `configuration/org.eclipse.equinox.simpleconfigurator/bundles.info`에서 `com.kcube.mavenview` 경로를 확인하고, 해당 jar 안의 클래스에 방금 추가한 문자열이 있는지 `grep -a`로 확인. 항상 **jar 파일 하나만** `dropins/` 바로 아래에 둘 것.
+
+- **p2 설치본과의 충돌**: Help > Install New Software(업데이트 사이트)로 설치한 feature(`com.kcube.mavenview.feature`)가 있는 Eclipse에 `dropins` jar를 넣으면, 같은 번들 ID가 충돌해 새 jar가 무시되거나 뷰가 사라진다. 이때 `plugins/`의 jar를 직접 지우거나 옮기면 p2 프로필과 어긋나 뷰가 깨진다. **Installation Details > Installed Software에서 해당 feature를 Uninstall**한 뒤 재시작하고, `dropins` 방식 하나만 쓸 것.
 
 ## 알려진 제한사항 / 참고
 - `org.eclipse.m2e.actions.MavenLaunchConstants`는 m2e 내부(`x-internal`) API라, m2e 버전이 바뀌면 호환이 깨질 가능성이 있다.

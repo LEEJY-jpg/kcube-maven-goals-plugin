@@ -81,6 +81,7 @@
 - **뷰가 비어있음**: pom.xml을 선택한 뒤 아무 버튼도 누르지 않았을 수 있습니다. `Add from Selection` 또는 드래그 앤 드롭으로 등록해주세요.
 - **더블클릭해도 실행 안 됨 / "mvn을 찾을 수 없음" 오류**: 체크박스가 **체크(외부 mvn)** 상태인데 PATH에 mvn이 없는 경우입니다. 체크를 해제해 Eclipse 내장 Maven을 쓰거나, 터미널에서 `mvn -v`로 설치를 확인하세요.
 - **업데이트한 jar를 넣었는데 변경이 반영 안 됨**: `dropins/` 안에 같은 플러그인이 두 군데 이상 있으면(예: 하위 폴더 `com.kcube.mavenview/eclipse/plugins/` 안의 옛 jar) 옛 것이 로드될 수 있습니다. 옛 복사본을 `dropins` 밖으로 옮기고 jar 하나만 남긴 뒤 `-clean`으로 재실행하세요.
+- **업데이트 사이트로 설치한 적이 있는데 `dropins` jar가 무시됨 / 뷰가 사라짐**: p2로 설치된 `KCube Maven Goals`(feature)와 `dropins`의 jar가 같은 플러그인이라 충돌합니다. `plugins/`의 jar를 직접 지우지 말고, `Help > About Eclipse IDE > Installation Details > Installed Software`에서 **KCube Maven Goals를 Uninstall**하고 재시작한 뒤 `dropins` jar 하나만 남기세요. 설치는 한 가지 방식만 사용하세요.
 - **dropin이 인식 안 됨**: 반드시 Eclipse를 완전히 종료(백그라운드에 남아있지 않은 상태)한 뒤 `-clean`으로 재실행해야 합니다. 같은 워크스페이스를 가리키는 Eclipse 인스턴스가 이미 떠 있으면 새 인스턴스가 "workspace in use" 상태로 무시될 수 있습니다.
 - **뷰가 아예 안 보임 (Java 버전 불일치)**: Eclipse가 도는 Java보다 높은 버전용으로 빌드된 jar면 번들이 resolve되지 않아 조용히 무시됩니다. 이 jar는 **Java 17 이상**이면 됩니다. 확인: `eclipse.ini`의 `-vm`(없으면 내장 JRE) 버전, 또는 `Help > About Eclipse IDE > Installation Details > Configuration`의 `java.version`.
 - **macOS에서 Eclipse가 아예 실행되지 않음 (`open` 시 "Launch failed", `launchd job spawn failed`)**: 앱 번들 파일(예: `Info.plist`)을 수정해 코드 서명이 깨진 경우입니다. `codesign --verify --deep --strict -vv /Applications/<Eclipse>.app`로 확인하고, 아래처럼 ad-hoc 재서명하면 실행됩니다.
