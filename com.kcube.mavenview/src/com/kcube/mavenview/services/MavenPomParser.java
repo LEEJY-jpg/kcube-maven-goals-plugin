@@ -175,10 +175,24 @@ public final class MavenPomParser
 					String invocation = group + ":" + artifact + ":" + g + (id == null || id.isBlank() ? "" : "@" + id);
 					addChild(
 						plugin,
-						new MavenGoal((id == null ? "" : id + ":") + g, invocation, MavenGoal.Type.EXECUTION, plugin));
+						new MavenGoal(
+							pluginPrefix(artifact) + ":" + g + (id == null || id.isBlank() ? "" : "@" + id),
+							invocation,
+							MavenGoal.Type.EXECUTION,
+							plugin));
 				}
 			}
 		}
+	}
+
+	/** artifactId에서 CLI용 플러그인 접두사를 구한다. maven-X-plugin, X-maven-plugin은 X, 그 외는 artifactId 그대로. */
+	static String pluginPrefix(String artifactId)
+	{
+		if (artifactId.startsWith("maven-") && artifactId.endsWith("-plugin") && artifactId.length() > 13)
+			return artifactId.substring(6, artifactId.length() - 7);
+		if (artifactId.endsWith("-maven-plugin") && artifactId.length() > 13)
+			return artifactId.substring(0, artifactId.length() - 13);
+		return artifactId;
 	}
 
 	/** 주어진 엘리먼트 바로 아래의 {@code <tag>} 자식 텍스트를 읽는다. 없으면 null. (손자 이후의 같은 이름 태그는 무시한다.) */
