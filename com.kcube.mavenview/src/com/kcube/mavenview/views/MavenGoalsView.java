@@ -567,6 +567,15 @@ public final class MavenGoalsView extends ViewPart
 		return name + " : " + GoalLabels.shorten(GoalHistory.goalOf(entry));
 	}
 
+	/**
+	 * 라벨을 메뉴 Action 텍스트로 쓸 수 있게 만든다. JFace는 텍스트의 마지막 '@'(탭이 없을 때) 뒤를 단축키 표기로 해석해 떼어내므로 "antrun:run@js"가
+	 * "antrun:run"으로 잘린다. 끝에 탭을 붙이면 '@'가 그대로 보인다. '&'는 니모닉이므로 '&&'로 이스케이프한다.
+	 */
+	private static String menuText(String label)
+	{
+		return label.replace("&", "&&") + "\t";
+	}
+
 	/** 노드가 즐겨찾기에 등록돼 있는지 확인한다. */
 	private boolean isFavorite(MavenGoal g)
 	{
@@ -793,7 +802,7 @@ public final class MavenGoalsView extends ViewPart
 		}
 		for (String e : history.favorites())
 		{
-			manager.add(new Action("\u2605 " + entryLabel(e))
+			manager.add(new Action(menuText("\u2605 " + entryLabel(e)))
 			{
 				@Override
 				public void run()
@@ -806,7 +815,7 @@ public final class MavenGoalsView extends ViewPart
 			manager.add(new Separator());
 		for (String e : history.recents())
 		{
-			manager.add(new Action(entryLabel(e))
+			manager.add(new Action(menuText(entryLabel(e)))
 			{
 				@Override
 				public void run()
