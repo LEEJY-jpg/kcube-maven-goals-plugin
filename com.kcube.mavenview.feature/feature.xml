@@ -2,10 +2,10 @@
 <feature
       id="com.kcube.mavenview.feature"
       label="KCube Maven Goals"
-      version="1.0.0.qualifier"
+      version="1.0.1"
       provider-name="KCube">
 
-   <description url="https://github.com/">
+   <description url="https://github.com/LEEJY-jpg/kcube-maven-goals-plugin">
       Maven lifecycle phases and plug-in goals in an Ant View-like tree. Double-click to run.
    </description>
 

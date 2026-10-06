@@ -97,7 +97,8 @@ class MavenPomParserTest
 		assertArrayEquals(new String[] {"org.foo", "foo-plugin"}, foo.getArguments());
 		List<MavenGoal> execs = MavenPomParser.children(foo);
 		assertEquals(3, execs.size());
-		assertEquals("run-it:go", execs.get(0).getName());
+		assertEquals("foo-plugin:go@run-it", execs.get(0).getName());
+		assertEquals("foo-plugin:bare", execs.get(2).getName());
 		assertEquals("org.foo:foo-plugin:go@run-it", execs.get(0).getGoal());
 		assertEquals("org.foo:foo-plugin:bare", execs.get(2).getGoal());
 		assertEquals(MavenGoal.Type.EXECUTION, execs.get(0).getType());
@@ -165,5 +166,13 @@ class MavenPomParserTest
 	private static void assertArrayEquals(String[] expected, String[] actual)
 	{
 		org.junit.jupiter.api.Assertions.assertArrayEquals(expected, actual);
+	}
+
+	@Test
+	void derivesPluginPrefix()
+	{
+		assertEquals("antrun", MavenPomParser.pluginPrefix("maven-antrun-plugin"));
+		assertEquals("spring-boot", MavenPomParser.pluginPrefix("spring-boot-maven-plugin"));
+		assertEquals("foo-plugin", MavenPomParser.pluginPrefix("foo-plugin"));
 	}
 }

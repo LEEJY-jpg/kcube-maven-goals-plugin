@@ -9,14 +9,14 @@ class GoalLabelsTest
 	@Test
 	void shortensExecutionGoal()
 	{
-		assertEquals("foo-plugin › run-it:go", GoalLabels.shorten("org.foo:foo-plugin:go@run-it"));
+		assertEquals("foo-plugin:go@run-it", GoalLabels.shorten("org.foo:foo-plugin:go@run-it"));
 	}
 
 	@Test
 	void shortensPluginGoalWithoutExecutionId()
 	{
 		assertEquals(
-			"maven-compiler-plugin › compile",
+			"compiler:compile",
 			GoalLabels.shorten("org.apache.maven.plugins:maven-compiler-plugin:compile"));
 	}
 
@@ -29,7 +29,7 @@ class GoalLabelsTest
 	@Test
 	void shortensOnlyPluginTokensInCommandLine()
 	{
-		assertEquals("foo-plugin › go -o", GoalLabels.shorten("org.foo:foo-plugin:go -o"));
+		assertEquals("foo-plugin:go -o", GoalLabels.shorten("org.foo:foo-plugin:go -o"));
 	}
 
 	@Test

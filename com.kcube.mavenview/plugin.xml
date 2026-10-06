@@ -30,7 +30,7 @@
          commandId="com.kcube.mavenview.commands.refresh"
          contextId="org.eclipse.ui.contexts.window"
          schemeId="org.eclipse.ui.defaultAcceleratorConfiguration"
-         sequence="M5+R"/>
+         sequence="M1+M2+F5"/>
    </extension>
 
 </plugin>

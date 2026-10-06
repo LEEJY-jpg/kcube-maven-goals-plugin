@@ -1,0 +1,50 @@
+name: Release
+
+# v1.0.0 같은 태그를 푸시하면 빌드 → GitHub Release 첨부 → p2 업데이트 사이트를 GitHub Pages로 배포한다.
+# 사전 설정: 저장소 Settings > Pages > Source 를 "GitHub Actions" 로 지정.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build (Tycho)
+        run: mvn -B -ntp clean verify
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            com.kcube.mavenview.update-site/target/com.kcube.mavenview.update-site-*.zip
+            com.kcube.mavenview/target/com.kcube.mavenview-*.jar
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: com.kcube.mavenview.update-site/target/repository
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
