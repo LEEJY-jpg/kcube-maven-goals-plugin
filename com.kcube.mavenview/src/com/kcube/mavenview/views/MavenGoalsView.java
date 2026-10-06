@@ -218,6 +218,18 @@ public final class MavenGoalsView extends ViewPart
 
 		viewer = new TreeViewer(parent);
 		viewer.getControl().setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
+		// DEL 키는 툴바의 X(삭제) 버튼과 동일하게 선택된 프로젝트를 제거한다.
+		viewer.getControl().addKeyListener(new org.eclipse.swt.events.KeyAdapter()
+		{
+			@Override
+			public void keyPressed(org.eclipse.swt.events.KeyEvent e)
+			{
+				if (e.keyCode == SWT.DEL)
+				{
+					removeSelected();
+				}
+			}
+		});
 		// 트리 데이터는 뷰가 직접 들고 있지 않고 projects 맵(최상위) + 각 MavenGoal 의 children(하위)에서 가져온다.
 		viewer.setContentProvider(new ITreeContentProvider()
 		{
