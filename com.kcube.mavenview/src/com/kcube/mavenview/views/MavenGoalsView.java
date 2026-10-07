@@ -20,7 +20,10 @@ import org.eclipse.jface.viewers.TreeViewer;
 import org.eclipse.jface.viewers.Viewer;
 import org.eclipse.jface.viewers.ViewerFilter;
 import org.eclipse.jface.window.Window;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.events.KeyAdapter;
+import org.eclipse.swt.events.KeyEvent;
 import org.eclipse.swt.graphics.Font;
 import org.eclipse.swt.graphics.Point;
 import org.eclipse.swt.layout.GridData;
@@ -218,15 +221,28 @@ public final class MavenGoalsView extends ViewPart
 
 		viewer = new TreeViewer(parent);
 		viewer.getControl().setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
-		// DEL 키는 툴바의 X(삭제) 버튼과 동일하게 선택된 프로젝트를 제거한다.
-		viewer.getControl().addKeyListener(new org.eclipse.swt.events.KeyAdapter()
+		// 키보드: DEL=X(삭제) 버튼과 동일, Enter=더블클릭과 동일, F5=새로고침, Ctrl/Cmd+F=검색창 포커스.
+		viewer.getControl().addKeyListener(new KeyAdapter()
 		{
 			@Override
-			public void keyPressed(org.eclipse.swt.events.KeyEvent e)
+			public void keyPressed(KeyEvent e)
 			{
 				if (e.keyCode == SWT.DEL)
 				{
 					removeSelected();
+				}
+				else if (e.keyCode == SWT.CR || e.keyCode == SWT.KEYPAD_CR)
+				{
+					activateSelected();
+				}
+				else if (e.keyCode == SWT.F5)
+				{
+					refreshAll();
+				}
+				else if ((e.stateMask & SWT.MOD1) != 0 && e.keyCode == 'f')
+				{
+					filterBox.setFocus();
+					filterBox.selectAll();
 				}
 			}
 		});
@@ -276,19 +292,7 @@ public final class MavenGoalsView extends ViewPart
 			}
 		});
 		viewer.setLabelProvider(new MavenGoalLabelProvider(this::isFavorite));
-		// 더블클릭: 실행 가능한 노드(goal이 설정된 노드)는 실행하고, 폴더성 노드(프로젝트/Lifecycle/Plugins/플러그인)는 접기/펼치기를 토글한다.
-		viewer.addDoubleClickListener(e -> {
-			if (((IStructuredSelection) e.getSelection()).getFirstElement() instanceof MavenGoal g
-				&& g.getGoal() == null
-				&& !MavenPomParser.children(g).isEmpty())
-			{
-				viewer.setExpandedState(g, !viewer.getExpandedState(g));
-			}
-			else
-			{
-				runSelectedGoal();
-			}
-		});
+		viewer.addDoubleClickListener(e -> activateSelected());
 		viewer.addFilter(new ViewerFilter()
 		{
 			/** 검색어가 비어 있으면 모두 통과시키고, 아니면 검색어와 일치하는 노드(와 그 경로)만 통과시킨다. */
@@ -544,6 +548,25 @@ public final class MavenGoalsView extends ViewPart
 				ViewPreferences.setUseExternalMvn(value);
 			}
 		}, createFavoritesAction());
+	}
+
+	/**
+	 * 더블클릭/Enter 공통 동작: 실행 가능한 노드(goal이 설정된 노드)는 실행하고,
+	 * 폴더성 노드(프로젝트/Lifecycle/Plugins/플러그인)는 접기/펼치기를 토글한다.
+	 */
+	private void activateSelected()
+	{
+		if (viewer.getSelection() instanceof IStructuredSelection ss
+			&& ss.getFirstElement() instanceof MavenGoal g
+			&& g.getGoal() == null
+			&& !MavenPomParser.children(g).isEmpty())
+		{
+			viewer.setExpandedState(g, !viewer.getExpandedState(g));
+		}
+		else
+		{
+			runSelectedGoal();
+		}
 	}
 
 	/**
@@ -880,9 +903,16 @@ public final class MavenGoalsView extends ViewPart
 	 */
 	private void removeSelected()
 	{
-		visibleNodes = null;
 		if (viewer.getSelection() instanceof IStructuredSelection ss)
 		{
+			long count = java.util.Arrays.stream(ss.toArray())
+				.filter(o -> o instanceof MavenGoal g && g.getType() == MavenGoal.Type.PROJECT).count();
+			if (count >= 2 && !MessageDialog.openConfirm(viewer.getControl().getShell(),
+				Messages.get("remove.confirm.title"), Messages.get("remove.confirm.message", count)))
+			{
+				return;
+			}
+			visibleNodes = null;
 			boolean changed = false;
 			for (Object o : ss.toArray())
 			{
