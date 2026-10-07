@@ -3,10 +3,12 @@ package com.kcube.mavenview.model;
 import java.io.File;
 
 /**
- * 하나의 트리 노드를 나타내는 불변(immutable) 모델.
+ * 하나의 트리 노드를 나타내는 모델.
  * <p>
  * Maven Goals 뷰의 트리는 등록된 pom.xml마다 하나의 PROJECT 루트 노드를 갖고, 그 아래로 Lifecycle phase, Plugin, Plugin의 execution-goal이 자식으로
- * 매달리는 구조다. 각 노드는 {@link #parent}를 통해 자신의 조상을 거슬러 올라갈 수 있고, 실제 자식 목록은 이 클래스가 아니라 {@code MavenPomParser}가 별도의 맵으로 관리한다
+ * 매달리는 구조다. 각 노드는 {@link #parent}를 통해 자신의 조상을 거슬러 올라갈 수 있고, 자식 목록은 이 클래스가 직접 들고 있다
+ * ({@link #getChildren()}). 이름/goal/종류/부모/인자/pom 파일은 생성 후 바뀌지 않으며, 자식은 {@code MavenPomParser}가 트리를 만드는 동안
+ * {@link #addChild}로만 채운다(파싱이 끝난 트리는 사실상 읽기 전용이다).
  */
 public final class MavenGoal
 {
@@ -32,6 +34,8 @@ public final class MavenGoal
 	private final File pomFile;
 	/** 트리 구조를 유지하기 위한 자식 노드 목록. */
 	private final java.util.List<MavenGoal> children = new java.util.ArrayList<>();
+	/** {@link #children}의 읽기 전용 뷰. 조회 때마다 새로 감싸지 않도록 한 번만 만든다(원본과 같은 내용을 비춘다). */
+	private final java.util.List<MavenGoal> childrenView = java.util.Collections.unmodifiableList(children);
 
 	/** 일반 트리 노드(Lifecycle/Plugin/Goal/Execution)를 생성한다. */
 	public MavenGoal(String name, String goal, Type type, MavenGoal parent, String... arguments)
@@ -118,7 +122,7 @@ public final class MavenGoal
 	/** 자식 노드 목록을 반환한다. */
 	public java.util.List<MavenGoal> getChildren()
 	{
-		return java.util.Collections.unmodifiableList(children);
+		return childrenView;
 	}
 
 	/** 트리 라벨로 쓰이도록 노드 이름을 반환한다. */
