@@ -18,7 +18,6 @@ import java.util.function.Predicate;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
-import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.core.runtime.jobs.IJobChangeEvent;
@@ -81,23 +80,36 @@ public final class MavenExecutor
 
 	// m2e 자체 런치 설정으로 실행한다("Run As > Maven Build"와 동일한 경로).
 	// 따라서 Eclipse에 내장된 Maven 런타임이 쓰이고, Console도 Eclipse가 직접 관리한다.
+	// launch()는 동기 호출이고 launch 전 빌드 등으로 오래 걸릴 수 있어 UI 스레드가 아니라 Job에서 부른다.
+	// 런치 진행 상황은 Eclipse가 자체 UI로 보여주므로 이 Job은 system Job으로 숨긴다.
 	private static void runEmbedded(File pom, String goalString)
 	{
-		try
+		Job job = new Job("Maven - " + goalString)
 		{
-			ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
-			ILaunchConfigurationType type = launchManager.getLaunchConfigurationType(
-				MavenLaunchConstants.LAUNCH_CONFIGURATION_TYPE_ID);
-			String name = launchManager.generateLaunchConfigurationName("Maven - " + goalString.replaceAll("[\\\\/]", "_"));
-			ILaunchConfigurationWorkingCopy wc = type.newInstance(null, name);
-			wc.setAttribute(MavenLaunchConstants.ATTR_POM_DIR, pom.getParentFile().getAbsolutePath());
-			wc.setAttribute(MavenLaunchConstants.ATTR_GOALS, goalString);
-			wc.launch(ILaunchManager.RUN_MODE, new NullProgressMonitor());
-		}
-		catch (Exception e)
-		{
-			PluginLog.log(IStatus.ERROR, "Failed to launch embedded Maven goal " + goalString, e);
-		}
+			@Override
+			protected IStatus run(IProgressMonitor monitor)
+			{
+				try
+				{
+					ILaunchManager launchManager = DebugPlugin.getDefault().getLaunchManager();
+					ILaunchConfigurationType type = launchManager.getLaunchConfigurationType(
+						MavenLaunchConstants.LAUNCH_CONFIGURATION_TYPE_ID);
+					String name = launchManager.generateLaunchConfigurationName(
+						"Maven - " + goalString.replaceAll("[\\\\/]", "_"));
+					ILaunchConfigurationWorkingCopy wc = type.newInstance(null, name);
+					wc.setAttribute(MavenLaunchConstants.ATTR_POM_DIR, pom.getParentFile().getAbsolutePath());
+					wc.setAttribute(MavenLaunchConstants.ATTR_GOALS, goalString);
+					wc.launch(ILaunchManager.RUN_MODE, monitor);
+				}
+				catch (Exception e)
+				{
+					PluginLog.log(IStatus.ERROR, "Failed to launch embedded Maven goal " + goalString, e);
+				}
+				return Status.OK_STATUS;
+			}
+		};
+		job.setSystem(true);
+		job.schedule();
 	}
 
 	/**
