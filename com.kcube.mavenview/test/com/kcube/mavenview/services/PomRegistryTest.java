@@ -110,4 +110,31 @@ class PomRegistryTest
 		assertTrue(registry.register(a));
 		assertTrue(registry.changed().isEmpty());
 	}
+
+	@Test
+	void brokenModulePomIsShownAndRecoversWhenFixed() throws Exception
+	{
+		Files.createDirectories(tmp.resolve("root/mod"));
+		File mod = Files.writeString(tmp.resolve("root/mod/pom.xml"), "<project><unclosed>").toFile();
+		File root = Files.writeString(tmp.resolve("root/pom.xml"),
+			"<project><modelVersion>4.0.0</modelVersion><artifactId>root</artifactId><modules><module>mod</module></modules></project>")
+			.toFile();
+		PomRegistry registry = new PomRegistry();
+		assertTrue(registry.register(root));
+		var modules = com.kcube.mavenview.services.MavenPomParser.children(registry.get(PomRegistry.key(root))).stream()
+			.filter(n -> n.getName().equals("Modules")).findFirst().orElseThrow();
+		var placeholder = com.kcube.mavenview.services.MavenPomParser.children(modules);
+		assertEquals(1, placeholder.size(), "깨진 모듈도 표시용 노드로 남는다");
+		assertTrue(placeholder.get(0).getName().contains("mod"));
+		assertTrue(registry.changed().isEmpty());
+
+		Files.writeString(mod.toPath(), POM.formatted("mod"));
+		mod.setLastModified(mod.lastModified() + 5000);
+		assertEquals(List.of(PomRegistry.key(root)), registry.changed(), "모듈 pom을 고치면 루트 프로젝트가 다시 읽힐 대상이 된다");
+		registry.register(root);
+		var fixed = com.kcube.mavenview.services.MavenPomParser.children(
+			com.kcube.mavenview.services.MavenPomParser.children(registry.get(PomRegistry.key(root))).stream()
+				.filter(n -> n.getName().equals("Modules")).findFirst().orElseThrow());
+		assertEquals("mod", fixed.get(0).getName(), "고친 뒤에는 정상 모듈로 표시된다");
+	}
 }

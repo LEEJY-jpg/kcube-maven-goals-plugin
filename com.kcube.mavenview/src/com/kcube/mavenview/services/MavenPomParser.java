@@ -10,6 +10,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
+import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.model.MavenGoal;
 
 /**
@@ -117,7 +118,7 @@ public final class MavenPomParser
 		return projectRoot;
 	}
 
-	/** {@code <modules><module>}에 선언된 하위 모듈 pom을 읽어 "Modules" 노드 아래에 추가한다. 읽을 수 없는 모듈은 건너뛴다. */
+	/** {@code <modules><module>}에 선언된 하위 모듈 pom을 읽어 "Modules" 노드 아래에 추가한다. 없는 모듈은 건너뛰고, 깨져서 읽을 수 없는 모듈은 표시용 노드로 남긴다. */
 	private static void parseModules(
 		MavenGoal projectRoot,
 		File pom,
@@ -144,8 +145,13 @@ public final class MavenPomParser
 			}
 			catch (Exception e)
 			{
-				// 깨진 모듈 pom 하나 때문에 전체 트리를 포기하지 않는다.
-				PluginLog.log(IStatus.WARNING, "Skipping unparsable module pom " + modulePom, e);
+				// 깨진 모듈 pom 하나 때문에 전체 트리를 포기하지 않는다. 대신 읽을 수 없다는 표시용 노드를 남기는데, 이 노드가 pom 파일을 들고 있어
+				// 변경 감시 대상에 포함되므로 모듈 pom을 고쳐 저장하면 자동으로 다시 읽혀 정상 모듈로 바뀐다.
+				PluginLog.log(IStatus.WARNING, "Unparsable module pom " + modulePom, e);
+				File dir = modulePom.getParentFile();
+				addChild(
+					folder,
+					new MavenGoal(Messages.get("module.unreadable", dir == null ? modulePom.getName() : dir.getName()), modulePom, folder));
 			}
 		}
 		if (!children(folder).isEmpty())
