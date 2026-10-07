@@ -137,4 +137,31 @@ class PomRegistryTest
 				.filter(n -> n.getName().equals("Modules")).findFirst().orElseThrow());
 		assertEquals("mod", fixed.get(0).getName(), "고친 뒤에는 정상 모듈로 표시된다");
 	}
+
+	@Test
+	void symlinkAndRealPathAreTheSameProjectButOriginalPathIsKept() throws Exception
+	{
+		org.junit.jupiter.api.Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().contains("win"));
+		File real = pom("real", "app");
+		Path link = Files.createSymbolicLink(tmp.resolve("link"), tmp.resolve("real"));
+		File viaLink = link.resolve("pom.xml").toFile();
+
+		assertEquals(PomRegistry.key(real), PomRegistry.key(viaLink), "같은 파일이면 같은 키");
+		PomRegistry registry = new PomRegistry();
+		assertTrue(registry.register(viaLink));
+		assertTrue(registry.contains(real), "실제 경로로도 이미 등록된 것으로 본다");
+		assertTrue(registry.register(real));
+		assertEquals(1, registry.keys().size(), "중복 등록되지 않는다");
+		assertEquals(viaLink, registry.fileOf(registry.keys().get(0)), "실행/저장에는 처음 등록한 원래 경로를 쓴다");
+		assertEquals(real.getCanonicalFile(), new File(registry.keys().get(0)));
+	}
+
+	@Test
+	void keyOfMissingFileFallsBackToAbsolutePathAndIsNotCached() throws Exception
+	{
+		File missing = new File(tmp.toFile(), "later/pom.xml");
+		assertEquals(missing.getAbsolutePath(), PomRegistry.key(missing));
+		File created = pom("later", "x");
+		assertEquals(created.getCanonicalPath(), PomRegistry.key(created), "생긴 뒤에는 정규 경로로 계산한다");
+	}
 }

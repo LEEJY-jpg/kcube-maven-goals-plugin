@@ -366,7 +366,7 @@ public final class MavenGoalsView extends ViewPart
 		Set<String> expanded = TreeExpansion.expandedPaths(viewer);
 		visibleNodes = null;
 		for (String k : keys)
-			registry.register(new File(k));
+			registry.register(registry.fileOf(k));
 		viewer.getControl().setRedraw(false);
 		try
 		{
@@ -634,6 +634,9 @@ public final class MavenGoalsView extends ViewPart
 	private void loadGoalLists()
 	{
 		ViewPreferences.loadHistory(history);
+		// 이전 버전은 절대 경로를 키로 저장했다. 지금의 정규 경로 키로 맞춰서(중복은 합침) 즐겨찾기 별표와 실행 항목이 계속 일치하게 한다.
+		if (history.rekey(path -> PomRegistry.key(new File(path))))
+			saveGoalLists();
 	}
 
 	/** 즐겨찾기/최근 실행 목록을 preference에 저장한다. */
@@ -667,7 +670,7 @@ public final class MavenGoalsView extends ViewPart
 	/** 항목을 현재 실행 방식(외부 mvn/내장)으로 실행하고 최근 목록에 올린다. */
 	private void runEntry(String entry)
 	{
-		File pom = new File(GoalHistory.pomOf(entry));
+		File pom = registry.fileOf(GoalHistory.pomOf(entry));
 		if (!pom.isFile())
 		{
 			pruneMissingPoms();
@@ -923,6 +926,7 @@ public final class MavenGoalsView extends ViewPart
 	 */
 	public void refreshAll()
 	{
+		PomRegistry.clearKeyCache();
 		pruneMissingPoms();
 		reparseKeepingExpansion(registry.keys());
 	}

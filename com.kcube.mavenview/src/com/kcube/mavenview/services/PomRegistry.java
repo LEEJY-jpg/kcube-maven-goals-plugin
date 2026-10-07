@@ -1,11 +1,13 @@
 package com.kcube.mavenview.services;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.core.runtime.IStatus;
 
@@ -14,17 +16,54 @@ import com.kcube.mavenview.model.MavenGoal;
 /**
  * 등록된 pom.xml(프로젝트)들의 모델. 파싱된 프로젝트 트리, 파일 변경 감시, 영속화를 한곳에서 관리하며 UI(SWT/JFace)에 의존하지 않는다.
  * <p>
- * 키는 pom.xml의 절대 경로({@link #key(File)})이고, 등록한 순서를 유지한다.
+ * 프로젝트의 <b>식별</b>은 pom.xml의 정규(canonical) 경로({@link #key(File)})로 한다. 심볼릭 링크나 대소문자·{@code ..} 표기가 달라도 같은 파일이면
+ * 같은 프로젝트로 취급해 중복 등록을 막는다. 반면 파싱·실행·저장에는 사용자가 등록한 <b>원래 경로</b>({@link #fileOf})를 그대로 쓴다. 정규 경로로
+ * 바꿔 쓰면 워크스페이스 프로젝트의 위치와 달라져 "Update Maven Project" 대상 매칭 등이 어긋날 수 있기 때문이다. 등록한 순서를 유지한다.
  */
 public final class PomRegistry
 {
 	private final Map<String, MavenGoal> projects = new LinkedHashMap<>();
+	/** 키(정규 경로) → 처음 등록한 원래 pom 파일. */
+	private final Map<String, File> files = new LinkedHashMap<>();
 	private final PomWatcher watcher = new PomWatcher();
 
-	/** projects 맵의 키로 쓰는, pom.xml의 절대 경로. */
+	/** 절대 경로 → 정규 경로. 노드를 그릴 때마다 키가 필요한데 매번 파일 시스템을 조회하지 않도록 캐시한다. */
+	private static final Map<String, String> KEY_CACHE = new ConcurrentHashMap<>();
+
+	/**
+	 * 프로젝트 식별 키: pom.xml의 정규(canonical) 경로. 파일이 없거나 정규화에 실패하면 절대 경로를 쓴다(이 경우는 캐시하지 않아 파일이
+	 * 생기면 다시 계산한다).
+	 */
 	public static String key(File pomFile)
 	{
-		return pomFile.getAbsolutePath();
+		String absolute = pomFile.getAbsolutePath();
+		String cached = KEY_CACHE.get(absolute);
+		if (cached != null)
+			return cached;
+		if (!pomFile.exists())
+			return absolute;
+		try
+		{
+			String canonical = pomFile.getCanonicalPath();
+			KEY_CACHE.put(absolute, canonical);
+			return canonical;
+		}
+		catch (IOException e)
+		{
+			return absolute;
+		}
+	}
+
+	/** 키 캐시를 비운다. 심볼릭 링크 대상이 바뀌었을 수 있는 새로고침 때 부른다. */
+	public static void clearKeyCache()
+	{
+		KEY_CACHE.clear();
+	}
+
+	/** 해당 키로 처음 등록된 원래 pom 파일. 등록되지 않은 키(예: 저장된 즐겨찾기 항목)는 키 경로 그대로의 파일. */
+	public File fileOf(String key)
+	{
+		return files.getOrDefault(key, new File(key));
 	}
 
 	/** 등록된 프로젝트 루트들(등록 순서). */
@@ -59,6 +98,7 @@ public final class PomRegistry
 		{
 			MavenGoal root = MavenPomParser.parseProject(pomFile);
 			projects.put(key, root);
+			files.putIfAbsent(key, pomFile);
 			watcher.remember(key, root);
 			return true;
 		}
@@ -79,6 +119,7 @@ public final class PomRegistry
 	{
 		if (projects.remove(key) == null)
 			return false;
+		files.remove(key);
 		watcher.forget(key);
 		return true;
 	}
@@ -89,7 +130,7 @@ public final class PomRegistry
 		boolean changed = false;
 		for (String key : keys())
 		{
-			if (!new File(key).isFile())
+			if (!fileOf(key).isFile())
 				changed |= remove(key);
 		}
 		return changed;
@@ -118,7 +159,8 @@ public final class PomRegistry
 	{
 		try
 		{
-			PomRegistryStore.save(projects.keySet());
+			// 식별 키(정규 경로)가 아니라 사용자가 등록한 원래 경로를 저장한다.
+			PomRegistryStore.save(files.values().stream().map(File::getAbsolutePath).toList());
 		}
 		catch (Exception e)
 		{
@@ -133,7 +175,10 @@ public final class PomRegistry
 		{
 			File pomFile = new File(path);
 			if (pomFile.isFile())
-				register(pomFile);
+			{
+				if (!contains(pomFile)) // 같은 파일을 다른 경로로 저장해 둔 경우(심볼릭 링크 등)는 하나만 등록한다.
+					register(pomFile);
+			}
 			else
 				PluginLog.log(IStatus.WARNING, "Previously registered pom.xml no longer exists: " + path, null);
 		}
@@ -143,5 +188,6 @@ public final class PomRegistry
 	public void clear()
 	{
 		projects.clear();
+		files.clear();
 	}
 }

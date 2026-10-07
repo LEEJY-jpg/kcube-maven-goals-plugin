@@ -100,6 +100,30 @@ public final class GoalHistory
 		return a || b;
 	}
 
+	/**
+	 * 모든 항목의 pom 경로를 변환한다(예: 절대 경로 → 정규 경로). 변환 결과가 같아진 항목은 하나로 합치고 순서는 유지하며, 최근 실행은 최대
+	 * 개수까지만 남긴다. 저장돼 있던 옛 형식의 경로를 현재 키 형식으로 맞추는 데 쓴다.
+	 *
+	 * @return 하나라도 바뀌었으면 true
+	 */
+	public boolean rekey(java.util.function.UnaryOperator<String> pomMapper)
+	{
+		java.util.function.UnaryOperator<String> mapEntry = e -> entry(pomMapper.apply(pomOf(e)), goalOf(e));
+		List<String> oldFavorites = new ArrayList<>(favorites);
+		List<String> oldRecents = new ArrayList<>(recents);
+		favorites.clear();
+		oldFavorites.forEach(e -> favorites.add(mapEntry.apply(e)));
+		recents.clear();
+		for (String e : oldRecents)
+		{
+			String mapped = mapEntry.apply(e);
+			if (!recents.contains(mapped))
+				recents.add(mapped);
+		}
+		trimRecents();
+		return !oldFavorites.equals(new ArrayList<>(favorites)) || !oldRecents.equals(recents);
+	}
+
 	/** 저장된 문자열(개행으로 구분)에서 목록을 읽는다. 형식이 잘못된 줄은 무시하고, 최근 실행은 최대 개수까지만 읽는다. */
 	public void load(String favoritesText, String recentsText)
 	{

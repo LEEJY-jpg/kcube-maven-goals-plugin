@@ -104,4 +104,22 @@ class GoalHistoryTest
 		assertEquals(List.of(e("/keep/pom.xml", "package")), h.recents());
 		assertFalse(h.prune(path -> path.startsWith("/keep")), "더 지울 것이 없으면 false");
 	}
+
+	@Test
+	void rekeyMapsPomPathsMergesDuplicatesAndKeepsOrder()
+	{
+		GoalHistory h = new GoalHistory();
+		h.toggleFavorite(GoalHistory.entry("/link/pom.xml", "install"));
+		h.toggleFavorite(GoalHistory.entry("/real/pom.xml", "install"));
+		h.addRecent(GoalHistory.entry("/real/pom.xml", "test"));
+		h.addRecent(GoalHistory.entry("/link/pom.xml", "test"));
+		h.addRecent(GoalHistory.entry("/other/pom.xml", "clean"));
+
+		assertTrue(h.rekey(p -> p.replace("/link/", "/real/")));
+		assertEquals(java.util.List.of(GoalHistory.entry("/real/pom.xml", "install")), new java.util.ArrayList<>(h.favorites()));
+		assertEquals(
+			java.util.List.of(GoalHistory.entry("/other/pom.xml", "clean"), GoalHistory.entry("/real/pom.xml", "test")),
+			h.recents());
+		assertFalse(h.rekey(p -> p), "바뀐 게 없으면 false");
+	}
 }
