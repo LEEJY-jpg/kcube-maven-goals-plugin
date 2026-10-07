@@ -164,4 +164,39 @@ class PomRegistryTest
 		File created = pom("later", "x");
 		assertEquals(created.getCanonicalPath(), PomRegistry.key(created), "생긴 뒤에는 정규 경로로 계산한다");
 	}
+
+	@Test
+	void parseDoesNotTouchRegistryUntilCommitted() throws Exception
+	{
+		PomRegistry registry = new PomRegistry();
+		File a = pom("a", "a");
+		PomRegistry.Parsed parsed = java.util.concurrent.CompletableFuture.supplyAsync(() -> PomRegistry.parse(a)).get();
+		assertNotNull(parsed.root());
+		assertFalse(registry.contains(a), "파싱만으로는 등록되지 않는다(UI 밖에서 파싱해도 안전)");
+		assertTrue(registry.commit(parsed, false));
+		assertTrue(registry.contains(a));
+	}
+
+	@Test
+	void commitOnlyIfRegisteredIgnoresProjectsRemovedMeanwhile() throws Exception
+	{
+		PomRegistry registry = new PomRegistry();
+		File a = pom("a", "a");
+		registry.register(a);
+		PomRegistry.Parsed reparsed = PomRegistry.parse(a);
+		registry.remove(PomRegistry.key(a)); // 파싱하는 동안 사용자가 제거
+		assertFalse(registry.commit(reparsed, true), "제거된 프로젝트를 되살리지 않는다");
+		assertFalse(registry.contains(a));
+		assertTrue(registry.commit(reparsed, false), "새 등록이면 반영한다");
+	}
+
+	@Test
+	void failedParseResultCarriesTheError() throws Exception
+	{
+		File broken = Files.writeString(tmp.resolve("broken.xml"), "<project><unclosed>").toFile();
+		PomRegistry.Parsed parsed = PomRegistry.parse(broken);
+		assertNull(parsed.root());
+		assertNotNull(parsed.error());
+		assertFalse(new PomRegistry().commit(parsed, false));
+	}
 }

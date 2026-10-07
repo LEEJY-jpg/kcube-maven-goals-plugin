@@ -90,28 +90,60 @@ public final class PomRegistry
 		return projects.containsKey(key(pomFile));
 	}
 
-	/** pom.xml을 파싱해 (교체) 등록한다. 파싱에 실패하면 기존 등록은 그대로 두고 로그만 남긴다. */
-	public boolean register(File pomFile)
+	/**
+	 * pom.xml 하나를 파싱한 결과. {@code root}가 null이면 실패이고 {@code error}에 원인이 있다.
+	 */
+	public record Parsed(File file, MavenGoal root, Exception error)
 	{
-		String key = key(pomFile);
+	}
+
+	/**
+	 * pom.xml을 파싱만 한다(레지스트리 상태는 건드리지 않는다). 파일을 읽는 느린 작업이라 UI 스레드 밖(Job)에서 불러도 안전하며,
+	 * 결과는 UI 스레드에서 {@link #commit}으로 반영한다.
+	 */
+	public static Parsed parse(File pomFile)
+	{
 		try
 		{
-			MavenGoal root = MavenPomParser.parseProject(pomFile);
-			projects.put(key, root);
-			files.putIfAbsent(key, pomFile);
-			watcher.remember(key, root);
-			return true;
+			return new Parsed(pomFile, MavenPomParser.parseProject(pomFile), null);
 		}
 		catch (Exception e)
 		{
-			PluginLog.log(IStatus.ERROR, "Failed to parse " + pomFile, e);
-			// 기존 트리를 유지하되 지문은 지금 파일 상태로 갱신한다. 그러지 않으면 깨진 pom이 계속 "변경됨"으로 잡혀
-			// 2초마다 같은 실패와 로그, 화면 갱신이 반복된다. 파일이 다시 바뀌면 그때 재시도한다.
-			MavenGoal existing = projects.get(key);
-			if (existing != null)
-				watcher.remember(key, existing);
-			return false;
+			return new Parsed(pomFile, null, e);
 		}
+	}
+
+	/**
+	 * 파싱 결과를 레지스트리에 반영한다. 레지스트리 상태를 바꾸므로 한 스레드(UI)에서만 호출한다.
+	 *
+	 * @param onlyIfRegistered true면 그사이 등록이 해제된 프로젝트는 되살리지 않고 무시한다(재파싱용)
+	 * @return 반영했으면 true. 파싱이 실패했거나 무시했으면 false
+	 */
+	public boolean commit(Parsed parsed, boolean onlyIfRegistered)
+	{
+		String key = key(parsed.file());
+		if (onlyIfRegistered && !projects.containsKey(key))
+			return false;
+		if (parsed.root() != null)
+		{
+			projects.put(key, parsed.root());
+			files.putIfAbsent(key, parsed.file());
+			watcher.remember(key, parsed.root());
+			return true;
+		}
+		PluginLog.log(IStatus.ERROR, "Failed to parse " + parsed.file(), parsed.error());
+		// 기존 트리를 유지하되 지문은 지금 파일 상태로 갱신한다. 그러지 않으면 깨진 pom이 계속 "변경됨"으로 잡혀
+		// 2초마다 같은 실패와 로그, 화면 갱신이 반복된다. 파일이 다시 바뀌면 그때 재시도한다.
+		MavenGoal existing = projects.get(key);
+		if (existing != null)
+			watcher.remember(key, existing);
+		return false;
+	}
+
+	/** pom.xml을 파싱해 (교체) 등록한다. 파싱과 반영을 같은 스레드에서 차례로 한다. 파싱에 실패하면 기존 등록은 그대로 두고 로그만 남긴다. */
+	public boolean register(File pomFile)
+	{
+		return commit(parse(pomFile), false);
 	}
 
 	/** 등록을 해제한다. 실제로 등록돼 있었으면 true. */
@@ -168,20 +200,29 @@ public final class PomRegistry
 		}
 	}
 
-	/** preference에 저장된 pom.xml 목록을 읽어 등록한다(파일이 사라졌으면 경고만 남김). */
-	public void loadSaved()
+	/**
+	 * preference에 저장된 pom.xml 중 지금도 있는 파일들을 반환한다(같은 파일을 다른 경로로 저장해 둔 중복은 하나만). 사라진 파일은 경고만 남긴다.
+	 * 파싱은 하지 않으므로 호출 측이 {@link #parse}/{@link #commit}으로 등록한다.
+	 */
+	public List<File> savedFiles()
 	{
+		List<File> result = new ArrayList<>();
+		java.util.Set<String> seen = new java.util.HashSet<>();
 		for (String path : PomRegistryStore.load())
 		{
 			File pomFile = new File(path);
-			if (pomFile.isFile())
-			{
-				if (!contains(pomFile)) // 같은 파일을 다른 경로로 저장해 둔 경우(심볼릭 링크 등)는 하나만 등록한다.
-					register(pomFile);
-			}
-			else
+			if (!pomFile.isFile())
 				PluginLog.log(IStatus.WARNING, "Previously registered pom.xml no longer exists: " + path, null);
+			else if (seen.add(key(pomFile)))
+				result.add(pomFile);
 		}
+		return result;
+	}
+
+	/** preference에 저장된 pom.xml 목록을 읽어 바로 등록한다(동기). */
+	public void loadSaved()
+	{
+		savedFiles().forEach(this::register);
 	}
 
 	/** 등록 내용을 모두 비운다. */

@@ -106,6 +106,8 @@ public final class MavenGoalsView extends ViewPart
 	private DropTarget dropTarget;
 	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
 	private IMemento savedState;
+	/** 저장된 상태를 복원했는지. 백그라운드 파싱이 끝나기 전에는 트리가 비어 있어 지금 상태를 저장하면 펼침 정보를 잃는다. */
+	private boolean stateRestored;
 	private Text filterBox;
 	/** 툴바의 즐겨찾기(별) 버튼. 선택에 따라 아이콘이 바뀐다. */
 	private Action favoritesAction;
@@ -126,6 +128,13 @@ public final class MavenGoalsView extends ViewPart
 	{
 		if (viewer == null || viewer.getControl().isDisposed())
 			return;
+		if (!stateRestored)
+		{
+			// 아직 로딩 중(트리가 비어 있음)에 종료/닫기가 되면 이전에 저장돼 있던 상태를 그대로 넘겨준다.
+			if (savedState != null)
+				memento.putMemento(savedState);
+			return;
+		}
 		IMemento tree = memento.createChild(MEMENTO_TREE);
 		tree.putString(MEMENTO_FILTER, filterBox.getText());
 		for (String path : TreeExpansion.expandedPaths(viewer))
@@ -137,6 +146,7 @@ public final class MavenGoalsView extends ViewPart
 	{
 		IMemento tree = savedState == null ? null : savedState.getChild(MEMENTO_TREE);
 		savedState = null;
+		stateRestored = true;
 		if (tree == null)
 			return;
 		String filter = tree.getString(MEMENTO_FILTER);
@@ -283,12 +293,51 @@ public final class MavenGoalsView extends ViewPart
 
 		loadGoalLists();
 		hookContextMenu();
-		registry.loadSaved();
-		viewer.refresh();
-		viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
-		pruneMissingPoms();
-		restoreState();
-		startPomWatch();
+		// 저장된 pom 파싱은 Job에서 하고(UI를 막지 않도록), 끝나면 UI 스레드에서 트리 표시, 사라진 pom 정리, 상태 복원, 변경 감시 시작을 이어서 한다.
+		parseAsync(registry.savedFiles(), false, () -> {
+			viewer.refresh();
+			viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+			pruneMissingPoms();
+			restoreState();
+			startPomWatch();
+		});
+	}
+
+	/**
+	 * pom.xml들을 백그라운드 Job에서 파싱하고, 끝나면 UI 스레드에서 레지스트리에 반영한 뒤 {@code afterCommit}을 실행한다.
+	 *
+	 * @param reparse true면 그사이 등록이 해제된 프로젝트는 되살리지 않는다(새로고침/변경 감지용)
+	 * @param afterCommit UI 스레드에서 반영 직후 호출(트리 갱신 등). 뷰가 이미 닫혔으면 호출하지 않는다.
+	 */
+	private void parseAsync(List<File> files, boolean reparse, Runnable afterCommit)
+	{
+		if (files.isEmpty())
+		{
+			afterCommit.run();
+			return;
+		}
+		Display display = viewer.getControl().getDisplay();
+		Job job = new Job("Parse pom.xml")
+		{
+			@Override
+			protected IStatus run(IProgressMonitor monitor)
+			{
+				List<PomRegistry.Parsed> results = files.stream().map(PomRegistry::parse).toList();
+				if (!display.isDisposed())
+				{
+					display.asyncExec(() -> {
+						if (viewer.getControl().isDisposed())
+							return;
+						visibleNodes = null;
+						results.forEach(r -> registry.commit(r, reparse));
+						afterCommit.run();
+					});
+				}
+				return Status.OK_STATUS;
+			}
+		};
+		job.setSystem(true);
+		job.schedule();
 	}
 
 	/** 뷰가 보이는 동안 2초마다 등록된 pom의 수정 여부를 확인해, 바뀐 프로젝트만 다시 파싱한다. */
@@ -339,10 +388,11 @@ public final class MavenGoalsView extends ViewPart
 					List<String> changed = registry.changed(snapshot);
 					if (!changed.isEmpty() && !display.isDisposed())
 					{
+						// 점검은 끝났지만 재파싱이 끝날 때까지는 다음 점검을 막아 같은 변경을 두 번 파싱하지 않는다.
 						display.asyncExec(() -> {
-							pomCheckRunning = false;
-							if (!viewer.getControl().isDisposed())
-								reparseKeepingExpansion(changed.stream().filter(k -> registry.get(k) != null).toList());
+							if (viewer.getControl().isDisposed())
+								return;
+							reparseKeepingExpansion(changed, () -> pomCheckRunning = false);
 						});
 						return Status.OK_STATUS;
 					}
@@ -361,22 +411,24 @@ public final class MavenGoalsView extends ViewPart
 	}
 
 	/** 지정한 프로젝트들을 다시 파싱하고 트리를 갱신하되, 갱신 전에 펼쳐져 있던 노드는 다시 펼친다. */
-	private void reparseKeepingExpansion(List<String> keys)
+	private void reparseKeepingExpansion(List<String> keys, Runnable done)
 	{
-		Set<String> expanded = TreeExpansion.expandedPaths(viewer);
-		visibleNodes = null;
-		for (String k : keys)
-			registry.register(registry.fileOf(k));
-		viewer.getControl().setRedraw(false);
-		try
-		{
-			viewer.refresh();
-			viewer.setExpandedElements(TreeExpansion.find(registry.roots(), expanded).toArray());
-		}
-		finally
-		{
-			viewer.getControl().setRedraw(true);
-		}
+		parseAsync(keys.stream().map(registry::fileOf).toList(), true, () -> {
+			// 아직 화면의 노드는 옛 객체이므로 지금 펼쳐진 상태를 읽을 수 있다(반영 후 refresh 전). 파싱 중에 사용자가 펼친 것도 반영된다.
+			Set<String> expanded = TreeExpansion.expandedPaths(viewer);
+			viewer.getControl().setRedraw(false);
+			try
+			{
+				viewer.refresh();
+				viewer.setExpandedElements(TreeExpansion.find(registry.roots(), expanded).toArray());
+			}
+			finally
+			{
+				viewer.getControl().setRedraw(true);
+			}
+			if (done != null)
+				done.run();
+		});
 	}
 
 	/** 뷰가 닫힐 때 외부 선택 추적 리스너와 예약된 타이머 작업, 드롭 대상을 해제한다. */
@@ -928,16 +980,18 @@ public final class MavenGoalsView extends ViewPart
 	{
 		PomRegistry.clearKeyCache();
 		pruneMissingPoms();
-		reparseKeepingExpansion(registry.keys());
+		reparseKeepingExpansion(registry.keys(), null);
 	}
 
 	/** 새 pom.xml 하나를 파싱해 등록하고, 트리를 갱신한 뒤 Lifecycle/Plugins까지 펼쳐 보여준다. */
 	private void addPom(File pomFile)
 	{
-		visibleNodes = null;
-		registry.register(pomFile);
-		viewer.refresh();
-		viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+		parseAsync(List.of(pomFile), false, () -> {
+			viewer.refresh();
+			viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+			// 호출 측(PomAdder/드롭)은 등록 직후 저장하지만 파싱은 아직 끝나기 전이라, 반영이 끝난 뒤 한 번 더 저장해 새 pom이 목록에 남게 한다.
+			registry.persist();
+		});
 	}
 
 	/** 뷰가 활성화되면 포커스를 트리에 준다. 사라진 pom 정리는 FS I/O라 지연 실행으로 합친다. */
