@@ -16,7 +16,9 @@ import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.IJobChangeEvent;
 import org.eclipse.core.runtime.jobs.Job;
+import org.eclipse.core.runtime.jobs.JobChangeAdapter;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunchConfigurationType;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
@@ -89,12 +91,20 @@ public final class MavenExecutor
 		}
 		catch (Exception e)
 		{
-			log(IStatus.ERROR, "Failed to launch embedded Maven goal " + goalString, e);
+			PluginLog.log(IStatus.ERROR, "Failed to launch embedded Maven goal " + goalString, e);
 		}
 	}
 
-	/** 실행 중인 외부 mvn 프로세스. 키는 "pom경로\tgoal"이며 같은 실행의 중복 시작을 막고 Stop에 쓰인다. */
-	private static final Map<String, Process> RUNNING = new ConcurrentHashMap<>();
+	/**
+	 * 실행 중이거나 시작 대기 중인 외부 mvn Job. 키는 "pom경로\tgoal"이다. 시작하기 전에 {@code putIfAbsent}로 자리를 먼저 잡아
+	 * 같은 실행이 거의 동시에 두 번 시작되는 것을 막고, Job이 끝나면(취소 포함) 제거한다. Stop에도 쓰인다.
+	 */
+	private static final Map<String, ExternalMvnJob> RUNNING = new ConcurrentHashMap<>();
+
+	/** 종료 신호(destroy) 후 mvn이 스스로 끝나길 기다리는 시간. 이 안에 안 끝나면 강제 종료(destroyForcibly)한다. */
+	private static final int STOP_GRACE_SECONDS = 5;
+	/** 종료 훅(Eclipse 종료 중)에서 기다리는 시간. 종료를 오래 붙잡지 않도록 짧게 잡는다. */
+	private static final int SHUTDOWN_GRACE_SECONDS = 2;
 
 	private static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().contains("win");
 
@@ -103,7 +113,7 @@ public final class MavenExecutor
 		// Eclipse가 실제로 종료될 때 fork된 mvn이 자식으로 남아있지 않도록 회수한다(단, 뷰를 닫는 것은 포함 안 함).
 		try
 		{
-			Runtime.getRuntime().addShutdownHook(new Thread(MavenExecutor::stopAll, "kcube-maven-shutdown"));
+			Runtime.getRuntime().addShutdownHook(new Thread(MavenExecutor::killAllOnShutdown, "kcube-maven-shutdown"));
 		}
 		catch (IllegalStateException ignored)
 		{
@@ -117,17 +127,66 @@ public final class MavenExecutor
 		return !RUNNING.isEmpty();
 	}
 
-	/** 실행 중인 외부 mvn 프로세스(자식 포함)를 모두 중단한다. 중단한 개수를 돌려준다. */
+	/**
+	 * 실행 중인 외부 mvn(자식 프로세스 포함)을 모두 중단한다. 먼저 정상 종료를 요청하고, {@value #STOP_GRACE_SECONDS}초 안에 끝나지 않으면
+	 * 강제 종료한다. 중단을 요청한 개수를 돌려준다.
+	 */
 	public static int stopAll()
 	{
 		int count = 0;
-		for (Process p : RUNNING.values())
+		for (ExternalMvnJob job : RUNNING.values())
 		{
-			p.descendants().forEach(ProcessHandle::destroy);
-			p.destroy();
+			job.cancel();
 			count++;
 		}
 		return count;
+	}
+
+	/** Eclipse 종료 시 호출한다. Job 시스템이 이미 내려갔을 수 있으므로 Job을 거치지 않고 프로세스를 직접, 짧게 기다리며 종료한다. */
+	private static void killAllOnShutdown()
+	{
+		for (ExternalMvnJob job : RUNNING.values())
+		{
+			Process p = job.process;
+			if (p != null)
+				terminate(p, SHUTDOWN_GRACE_SECONDS, true);
+		}
+	}
+
+	/**
+	 * 프로세스와 그 자식들을 2단계로 종료한다: 먼저 {@code destroy()}로 정상 종료를 요청하고, grace 시간 안에 모두 끝나지 않으면
+	 * {@code destroyForcibly()}로 강제 종료한다. 종료 신호를 무시하는 mvn이 좀비로 남는 것을 막는다.
+	 *
+	 * @param block true면 호출 스레드에서 기다린다(종료 훅용). false면 기다림과 강제 종료를 백그라운드에서 한다(UI 스레드용).
+	 */
+	static void terminate(Process p, int graceSeconds, boolean block)
+	{
+		// 종료 신호를 보내기 전에 자식 목록을 먼저 잡는다(부모가 죽으면 자식의 부모 관계가 바뀌어 찾을 수 없다).
+		List<ProcessHandle> all = new ArrayList<>();
+		p.descendants().forEach(all::add);
+		all.add(p.toHandle());
+		all.forEach(ProcessHandle::destroy);
+		java.util.concurrent.CompletableFuture<?> exited = java.util.concurrent.CompletableFuture.allOf(
+			all.stream().map(ProcessHandle::onExit).toArray(java.util.concurrent.CompletableFuture[]::new));
+		Runnable force = () -> all.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+		if (block)
+		{
+			try
+			{
+				exited.get(graceSeconds, TimeUnit.SECONDS);
+			}
+			catch (Exception e)
+			{
+				force.run();
+			}
+		}
+		else
+		{
+			exited.orTimeout(graceSeconds, TimeUnit.SECONDS).whenComplete((v, t) -> {
+				if (t != null)
+					force.run();
+			});
+		}
 	}
 
 	/**
@@ -153,7 +212,9 @@ public final class MavenExecutor
 		// 실행마다 콘솔을 보여준다. 같은 이름의 콘솔이 있으면 비우고 재사용해 콘솔이 무한정 늘지 않게 한다.
 		MessageConsole console = consoleFor("Maven - " + goalString);
 		ConsolePlugin.getDefault().getConsoleManager().showConsoleView(console);
-		if (RUNNING.containsKey(runKey))
+		ExternalMvnJob job = new ExternalMvnJob(console, pom, goalString, runKey);
+		// 검사와 등록을 한 번에 해서(원자적) 거의 동시에 두 번 눌러도 하나만 시작한다.
+		if (RUNNING.putIfAbsent(runKey, job) != null)
 		{
 			console.newMessageStream().println(Messages.get("console.already.running"));
 			return;
@@ -161,7 +222,7 @@ public final class MavenExecutor
 		console.clearConsole();
 
 		// mvn 프로세스는 오래 걸릴 수 있으므로 UI 스레드를 막지 않도록 Job으로 실행한다(Progress 뷰에 표시되고 취소할 수 있다).
-		new ExternalMvnJob(console, pom, goalString, runKey).schedule();
+		job.schedule();
 	}
 
 	/** 외부 mvn 프로세스를 실행하고 출력을 콘솔로 중계하는 Job. 취소하면 mvn과 그 자식 프로세스를 중단한다. */
@@ -181,6 +242,15 @@ public final class MavenExecutor
 			this.pom = pom;
 			this.goalString = goalString;
 			this.runKey = runKey;
+			// 정상 종료, 오류, 시작 전 취소 어느 경우든 Job이 끝나면 자리를 비운다.
+			addJobChangeListener(new JobChangeAdapter()
+			{
+				@Override
+				public void done(IJobChangeEvent event)
+				{
+					MavenExecutor.RUNNING.remove(runKey, ExternalMvnJob.this);
+				}
+			});
 		}
 
 		@Override
@@ -207,26 +277,18 @@ public final class MavenExecutor
 				}
 				Process started = pb.start();
 				process = started;
-				MavenExecutor.RUNNING.put(runKey, started);
-				try
+				if (cancelled)
+					stop(started);
+				// 프로세스 출력을 한 줄씩 그대로 콘솔에 중계한다.
+				try (BufferedReader r = new BufferedReader(
+					new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8)))
 				{
-					if (cancelled)
-						stop(started);
-					// 프로세스 출력을 한 줄씩 그대로 콘솔에 중계한다.
-					try (BufferedReader r = new BufferedReader(
-						new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8)))
-					{
-						String line;
-						while ((line = r.readLine()) != null)
-							out.println(line);
-					}
-					int exit = started.waitFor();
-					out.println(Messages.get(cancelled ? "console.cancelled" : "console.finished", exit));
+					String line;
+					while ((line = r.readLine()) != null)
+						out.println(line);
 				}
-				finally
-				{
-					MavenExecutor.RUNNING.remove(runKey);
-				}
+				int exit = started.waitFor();
+				out.println(Messages.get(cancelled ? "console.cancelled" : "console.finished", exit));
 				return cancelled ? Status.CANCEL_STATUS : Status.OK_STATUS;
 			}
 			catch (Exception e)
@@ -239,7 +301,7 @@ public final class MavenExecutor
 				{
 					// 콘솔마저 쓸 수 없으면 아래 로그로만 남긴다.
 				}
-				log(IStatus.WARNING, "Failed to run external Maven goal " + goalString, e);
+				PluginLog.log(IStatus.WARNING, "Failed to run external Maven goal " + goalString, e);
 				return Status.OK_STATUS;
 			}
 		}
@@ -256,8 +318,7 @@ public final class MavenExecutor
 
 		private static void stop(Process p)
 		{
-			p.descendants().forEach(ProcessHandle::destroy);
-			p.destroy();
+			terminate(p, STOP_GRACE_SECONDS, false);
 		}
 	}
 
@@ -311,7 +372,7 @@ public final class MavenExecutor
 				return candidate;
 		}
 
-		log(
+		PluginLog.log(
 			IStatus.WARNING,
 			"Could not locate an mvn executable via PATH, login shell PATH, "
 				+ "or common install locations; falling back to bare \"mvn\" (will likely fail)",
@@ -357,11 +418,11 @@ public final class MavenExecutor
 			}
 		catch (TimeoutException e)
 			{
-			log(IStatus.WARNING, "Login shell did not report PATH within " + LOGIN_SHELL_TIMEOUT_SECONDS + "s", null);
+			PluginLog.log(IStatus.WARNING, "Login shell did not report PATH within " + LOGIN_SHELL_TIMEOUT_SECONDS + "s", null);
 			}
 		catch (Exception e)
 			{
-			log(IStatus.WARNING, "Failed to read PATH from login shell", e);
+			PluginLog.log(IStatus.WARNING, "Failed to read PATH from login shell", e);
 			}
 		finally
 			{
@@ -370,11 +431,5 @@ public final class MavenExecutor
 			pool.shutdownNow();
 			}
 		return cachedLoginShellPath;
-	}
-
-	/** Eclipse Error Log에 이 플러그인 이름으로 메시지를 기록한다. */
-	private static void log(int severity, String message, Throwable e)
-	{
-		Platform.getLog(MavenExecutor.class).log(new Status(severity, "com.kcube.mavenview", message, e));
 	}
 }
