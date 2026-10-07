@@ -90,10 +90,22 @@ public final class PomRegistry
 		return changed;
 	}
 
+	/** 현재 등록 상태의 복사본. 다른 스레드에서 {@link #changed(Map)}에 넘겨 파일 I/O를 UI 밖에서 하기 위해 쓴다. */
+	public Map<String, MavenGoal> snapshot()
+	{
+		return new LinkedHashMap<>(projects);
+	}
+
 	/** 마지막 파싱 이후 파일이 바뀐 프로젝트 키들. */
 	public List<String> changed()
 	{
-		return watcher.changed(projects);
+		return changed(projects);
+	}
+
+	/** 주어진 스냅샷 기준으로 마지막 파싱 이후 파일이 바뀐 프로젝트 키들. 파일 시스템을 읽으므로 UI 스레드 밖에서 호출해도 된다. */
+	public List<String> changed(Map<String, MavenGoal> snapshot)
+	{
+		return watcher.changed(snapshot);
 	}
 
 	/** 현재 등록 목록을 workspace preference에 저장한다. 실패하면 경고 로그만 남긴다. */

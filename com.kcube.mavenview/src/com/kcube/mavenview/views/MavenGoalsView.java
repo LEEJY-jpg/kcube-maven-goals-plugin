@@ -5,9 +5,13 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.Separator;
@@ -96,6 +100,8 @@ public final class MavenGoalsView extends ViewPart
 	private static final int POM_WATCH_INTERVAL_MS = 2000;
 
 	private Runnable pomWatchTask;
+	/** 백그라운드 pom 변경 점검이 진행 중인지(중복 점검 방지). UI 스레드에서만 읽고 쓴다. */
+	private boolean pomCheckRunning;
 	/** pom.xml 드롭을 받기 위한 드롭 대상. 뷰 종료 시 네이티브 핸들을 해제한다. */
 	private DropTarget dropTarget;
 	/** 뷰를 다시 열 때 복원할 저장 상태(펼침/검색어). 없으면 null. */
@@ -298,7 +304,7 @@ public final class MavenGoalsView extends ViewPart
 				try
 				{
 					if (getSite().getPage().isPartVisible(MavenGoalsView.this))
-						reloadChangedPoms();
+						checkChangedPoms();
 				}
 				catch (RuntimeException e)
 				{
@@ -310,13 +316,48 @@ public final class MavenGoalsView extends ViewPart
 		viewer.getControl().getDisplay().timerExec(POM_WATCH_INTERVAL_MS, pomWatchTask);
 	}
 
-	/** 파일이 바뀐 프로젝트만 다시 파싱한다. 펼침 상태는 유지한다. */
-	private void reloadChangedPoms()
+	/**
+	 * 파일 수정 여부 점검(프로젝트마다 pom 파일 상태를 읽는 I/O)은 백그라운드 Job에서 하고, 바뀐 프로젝트가 있을 때만 UI 스레드에서 다시 파싱한다.
+	 * 이전 점검이 아직 끝나지 않았으면 건너뛴다.
+	 */
+	private void checkChangedPoms()
 	{
-		List<String> changed = registry.changed();
-		if (changed.isEmpty())
+		if (pomCheckRunning)
 			return;
-		reparseKeepingExpansion(changed);
+		Map<String, MavenGoal> snapshot = registry.snapshot();
+		if (snapshot.isEmpty())
+			return;
+		pomCheckRunning = true;
+		Display display = viewer.getControl().getDisplay();
+		Job job = new Job("Check pom.xml changes")
+		{
+			@Override
+			protected IStatus run(IProgressMonitor monitor)
+			{
+				try
+				{
+					List<String> changed = registry.changed(snapshot);
+					if (!changed.isEmpty() && !display.isDisposed())
+					{
+						display.asyncExec(() -> {
+							pomCheckRunning = false;
+							if (!viewer.getControl().isDisposed())
+								reparseKeepingExpansion(changed.stream().filter(k -> registry.get(k) != null).toList());
+						});
+						return Status.OK_STATUS;
+					}
+				}
+				catch (RuntimeException e)
+				{
+					PluginLog.log(IStatus.WARNING, "Failed to check pom changes", e);
+				}
+				if (!display.isDisposed())
+					display.asyncExec(() -> pomCheckRunning = false);
+				return Status.OK_STATUS;
+			}
+		};
+		job.setSystem(true);
+		job.schedule();
 	}
 
 	/** 지정한 프로젝트들을 다시 파싱하고 트리를 갱신하되, 갱신 전에 펼쳐져 있던 노드는 다시 펼친다. */

@@ -9,8 +9,12 @@ import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.jobs.Job;
+import org.eclipse.jface.dialogs.MessageDialog;
 import org.eclipse.jface.viewers.IStructuredSelection;
+import org.eclipse.swt.widgets.Display;
+import org.eclipse.swt.widgets.Shell;
 
+import com.kcube.mavenview.Messages;
 import com.kcube.mavenview.model.MavenGoal;
 import com.kcube.mavenview.services.PluginLog;
 
@@ -26,7 +30,7 @@ final class MavenProjectUpdater
 	{
 		if (ss == null || ss.isEmpty())
 		{
-			PluginLog.log(IStatus.WARNING, "Select a registered project to update", null);
+			notifyUser(IStatus.WARNING, "update.noSelection", null);
 			return;
 		}
 		List<IProject> toUpdate = new ArrayList<>();
@@ -42,7 +46,7 @@ final class MavenProjectUpdater
 		}
 		if (toUpdate.isEmpty())
 		{
-			PluginLog.log(IStatus.WARNING, "Selected pom.xml is not part of a workspace project; nothing to update", null);
+			notifyUser(IStatus.WARNING, "update.notWorkspace", null);
 			return;
 		}
 		scheduleUpdate(toUpdate);
@@ -69,8 +73,25 @@ final class MavenProjectUpdater
 		}
 		catch (ReflectiveOperationException e)
 		{
-			PluginLog.log(IStatus.ERROR, "Failed to start Update Maven Project", e);
+			// m2e 내부 클래스를 리플렉션으로 호출하므로 m2e 버전이 바뀌면 여기서 실패할 수 있다.
+			notifyUser(IStatus.ERROR, "update.failed", e);
 		}
+	}
+
+	/** 결과를 Error Log에 남기고, 사용자 동작(버튼 클릭)의 결과이므로 대화상자로도 알린다. */
+	private static void notifyUser(int severity, String messageKey, Throwable e)
+	{
+		String message = Messages.get(messageKey);
+		PluginLog.log(severity, message, e);
+		Display display = Display.getCurrent();
+		if (display == null)
+			return;
+		Shell shell = display.getActiveShell();
+		String title = Messages.get("update.title");
+		if (severity == IStatus.ERROR)
+			MessageDialog.openError(shell, title, message + (e != null ? "\n\n" + e : ""));
+		else
+			MessageDialog.openInformation(shell, title, message);
 	}
 
 	/**

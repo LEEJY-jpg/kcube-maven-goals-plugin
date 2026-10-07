@@ -11,10 +11,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.debug.core.DebugPlugin;
 import org.eclipse.debug.core.ILaunchConfigurationType;
 import org.eclipse.debug.core.ILaunchConfigurationWorkingCopy;
@@ -158,8 +160,32 @@ public final class MavenExecutor
 		}
 		console.clearConsole();
 
-		// mvn 프로세스는 오래 걸릴 수 있으므로 UI 스레드를 막지 않도록 별도 스레드에서 실행.
-		Thread worker = new Thread(() -> {
+		// mvn 프로세스는 오래 걸릴 수 있으므로 UI 스레드를 막지 않도록 Job으로 실행한다(Progress 뷰에 표시되고 취소할 수 있다).
+		new ExternalMvnJob(console, pom, goalString, runKey).schedule();
+	}
+
+	/** 외부 mvn 프로세스를 실행하고 출력을 콘솔로 중계하는 Job. 취소하면 mvn과 그 자식 프로세스를 중단한다. */
+	private static final class ExternalMvnJob extends Job
+	{
+		private final MessageConsole console;
+		private final File pom;
+		private final String goalString;
+		private final String runKey;
+		private volatile Process process;
+		private volatile boolean cancelled;
+
+		ExternalMvnJob(MessageConsole console, File pom, String goalString, String runKey)
+		{
+			super("Maven - " + goalString);
+			this.console = console;
+			this.pom = pom;
+			this.goalString = goalString;
+			this.runKey = runKey;
+		}
+
+		@Override
+		protected IStatus run(IProgressMonitor monitor)
+		{
 			try (MessageConsoleStream out = console.newMessageStream())
 			{
 				String loginShellPath = loginShellPath();
@@ -179,25 +205,29 @@ public final class MavenExecutor
 				{
 					pb.environment().put("PATH", loginShellPath);
 				}
-				Process process = pb.start();
-				RUNNING.put(runKey, process);
+				Process started = pb.start();
+				process = started;
+				MavenExecutor.RUNNING.put(runKey, started);
 				try
 				{
+					if (cancelled)
+						stop(started);
 					// 프로세스 출력을 한 줄씩 그대로 콘솔에 중계한다.
 					try (BufferedReader r = new BufferedReader(
-						new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8)))
+						new InputStreamReader(started.getInputStream(), StandardCharsets.UTF_8)))
 					{
 						String line;
 						while ((line = r.readLine()) != null)
 							out.println(line);
 					}
-					int exit = process.waitFor();
-					out.println(Messages.get("console.finished", exit));
+					int exit = started.waitFor();
+					out.println(Messages.get(cancelled ? "console.cancelled" : "console.finished", exit));
 				}
 				finally
 				{
-					RUNNING.remove(runKey);
+					MavenExecutor.RUNNING.remove(runKey);
 				}
+				return cancelled ? Status.CANCEL_STATUS : Status.OK_STATUS;
 			}
 			catch (Exception e)
 			{
@@ -207,11 +237,28 @@ public final class MavenExecutor
 				}
 				catch (Exception ignored)
 				{
+					// 콘솔마저 쓸 수 없으면 아래 로그로만 남긴다.
 				}
+				log(IStatus.WARNING, "Failed to run external Maven goal " + goalString, e);
+				return Status.OK_STATUS;
 			}
-		}, "kcube-maven-exec");
-		worker.setDaemon(true);
-		worker.start();
+		}
+
+		/** Progress 뷰에서 취소하면 실행 중인 mvn 프로세스 트리를 중단한다. */
+		@Override
+		protected void canceling()
+		{
+			cancelled = true;
+			Process p = process;
+			if (p != null)
+				stop(p);
+		}
+
+		private static void stop(Process p)
+		{
+			p.descendants().forEach(ProcessHandle::destroy);
+			p.destroy();
+		}
 	}
 
 	/** 이름이 같은 기존 콘솔을 찾아 돌려주고, 없으면 새로 만들어 등록한다. */

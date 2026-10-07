@@ -2,9 +2,9 @@ package com.kcube.mavenview.services;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.kcube.mavenview.model.MavenGoal;
 
@@ -15,7 +15,8 @@ import com.kcube.mavenview.model.MavenGoal;
  */
 public final class PomWatcher
 {
-	private final Map<String, String> fingerprints = new HashMap<>();
+	/** UI 스레드(remember/forget)와 백그라운드 점검(changed)이 함께 쓰므로 동시성 맵을 쓴다. */
+	private final Map<String, String> fingerprints = new ConcurrentHashMap<>();
 
 	/** 프로젝트 트리에 속한 모든 pom.xml(루트 + 모듈)의 현재 상태를 지문으로 기록한다. */
 	public void remember(String key, MavenGoal root)
