@@ -2,7 +2,7 @@
 <feature
       id="com.kcube.mavenview.feature"
       label="KCube Maven Goals"
-      version="1.0.2"
+      version="1.0.3"
       provider-name="KCube">
 
    <description url="https://github.com/LEEJY-jpg/kcube-maven-goals-plugin">
