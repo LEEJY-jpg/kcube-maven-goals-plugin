@@ -92,9 +92,10 @@ public final class MavenPomParser
 		Document d = newSecureDocumentBuilder().parse(pom);
 		Element project = d.getDocumentElement();
 
-		String name = text(project, "name");
+		PomProperties props = PomProperties.of(project, pom);
+		String name = props.resolve(text(project, "name"));
 		if (name == null || name.isBlank())
-			name = text(project, "artifactId");
+			name = props.resolve(text(project, "artifactId"));
 		if (name == null || name.isBlank())
 			name = pom.getParentFile().getName();
 
@@ -109,15 +110,20 @@ public final class MavenPomParser
 
 		MavenGoal plugins = new MavenGoal("Plugins", null, MavenGoal.Type.PLUGIN, projectRoot);
 		addChild(projectRoot, plugins);
-		parsePlugins(plugins, project.getElementsByTagName("plugin"));
+		parsePlugins(plugins, declaredPlugins(project), props);
 
-		parseModules(projectRoot, pom, project, visited);
+		parseModules(projectRoot, pom, project, visited, props);
 
 		return projectRoot;
 	}
 
 	/** {@code <modules><module>}에 선언된 하위 모듈 pom을 읽어 "Modules" 노드 아래에 추가한다. 읽을 수 없는 모듈은 건너뛴다. */
-	private static void parseModules(MavenGoal projectRoot, File pom, Element project, java.util.Set<String> visited)
+	private static void parseModules(
+		MavenGoal projectRoot,
+		File pom,
+		Element project,
+		java.util.Set<String> visited,
+		PomProperties props)
 	{
 		Element modules = directChild(project, "modules");
 		if (modules == null)
@@ -125,7 +131,7 @@ public final class MavenPomParser
 		MavenGoal folder = new MavenGoal("Modules", null, MavenGoal.Type.MODULES, projectRoot);
 		for (Element m : directChildren(modules, "module"))
 		{
-			String path = m.getTextContent() == null ? "" : m.getTextContent().trim();
+			String path = m.getTextContent() == null ? "" : props.resolve(m.getTextContent().trim());
 			if (path.isEmpty())
 				continue;
 			File modulePom = new File(pom.getParentFile(), path);
@@ -147,14 +153,14 @@ public final class MavenPomParser
 	}
 
 	/** parent의 직접 자식 중 이름이 tag인 첫 엘리먼트를 반환한다. 없으면 null. */
-	private static Element directChild(Element parent, String tag)
+	static Element directChild(Element parent, String tag)
 	{
 		List<Element> found = directChildren(parent, tag);
 		return found.isEmpty() ? null : found.get(0);
 	}
 
 	/** parent의 직접 자식 중 이름이 tag인 엘리먼트들을 반환한다. */
-	private static List<Element> directChildren(Element parent, String tag)
+	static List<Element> directChildren(Element parent, String tag)
 	{
 		List<Element> result = new java.util.ArrayList<>();
 		for (org.w3c.dom.Node n = parent.getFirstChild(); n != null; n = n.getNextSibling())
@@ -165,47 +171,83 @@ public final class MavenPomParser
 		return result;
 	}
 
-	/** pom.xml의 모든 {@code <plugin>} 선언을 읽어 "Plugins" 노드 아래에 플러그인별 하위 트리를 만든다. */
-	private static void parsePlugins(MavenGoal plugins, NodeList nodes)
+	/**
+	 * 실제로 빌드에 바인딩되는 플러그인 선언만 모은다: {@code <build><plugins>}와 프로파일의 {@code <build><plugins>}.
+	 * {@code <pluginManagement>}(버전/설정만 정하고 실행은 하지 않음)와 {@code <reporting>}은 제외한다. 이전에는 pom 전체에서
+	 * {@code <plugin>}을 찾아 그런 것들까지 실행 가능한 것처럼 보였다.
+	 */
+	private static List<Element> declaredPlugins(Element project)
 	{
-		for (int i = 0; i < nodes.getLength(); i++)
+		List<Element> result = new java.util.ArrayList<>(buildPlugins(project));
+		Element profiles = directChild(project, "profiles");
+		if (profiles != null)
 		{
-			Element p = (Element) nodes.item(i);
-			String artifact = text(p, "artifactId");
+			for (Element profile : directChildren(profiles, "profile"))
+				result.addAll(buildPlugins(profile));
+		}
+		return result;
+	}
+
+	/** parent(project 또는 profile) 바로 아래 {@code <build><plugins><plugin>}들. */
+	private static List<Element> buildPlugins(Element parent)
+	{
+		Element build = directChild(parent, "build");
+		Element plugins = build == null ? null : directChild(build, "plugins");
+		return plugins == null ? List.of() : directChildren(plugins, "plugin");
+	}
+
+	/**
+	 * 플러그인 선언들을 읽어 "Plugins" 노드 아래에 플러그인별 하위 트리를 만든다. 같은 플러그인이 기본 빌드와 프로파일에 함께 선언돼 있으면
+	 * 노드는 하나로 합치고 execution만 더한다.
+	 */
+	private static void parsePlugins(MavenGoal plugins, List<Element> declarations, PomProperties props)
+	{
+		java.util.Map<String, MavenGoal> byId = new java.util.HashMap<>();
+		for (Element p : declarations)
+		{
+			String artifact = props.resolve(text(p, "artifactId"));
 			if (artifact == null)
 				continue; // artifactId 없는(= 유효하지 않은) plugin 선언은 건너뜀
-			String group = text(p, "groupId");
+			String group = props.resolve(text(p, "groupId"));
 			if (group == null)
 				group = "org.apache.maven.plugins"; // groupId 생략 시 Maven 기본 플러그인으로 간주
 
-			MavenGoal plugin = new MavenGoal(
-				group + ":" + artifact, null, MavenGoal.Type.PLUGIN, plugins, group, artifact);
-			addChild(plugins, plugin);
+			MavenGoal plugin = byId.get(group + ":" + artifact);
+			if (plugin == null)
+			{
+				plugin = new MavenGoal(group + ":" + artifact, null, MavenGoal.Type.PLUGIN, plugins, group, artifact);
+				addChild(plugins, plugin);
+				byId.put(group + ":" + artifact, plugin);
+			}
 
 			// 플러그인에 바인딩된 execution들을 실행 가능한 goal 노드로 펼친다.
 			NodeList executions = p.getElementsByTagName("execution");
 			for (int j = 0; j < executions.getLength(); j++)
 			{
 				Element e = (Element) executions.item(j);
-				String id = text(e, "id");
+				String id = props.resolve(text(e, "id"));
 				NodeList goals = e.getElementsByTagName("goal");
 			for (int k = 0; k < goals.getLength(); k++)
 				{
 				String raw = goals.item(k).getTextContent();
 				if (raw == null || raw.isBlank())
 					continue;
-				String g = raw.trim();
+				String g = props.resolve(raw.trim());
 					// "plugin:goal@executionId"(Maven 3.3.1+)는 해당 execution 자신의
 					// <configuration>으로 실행한다. 그냥 "plugin:goal"로 실행하면 플러그인의 default-cli
 					// 실행이 돌아가 execution 블록은 완전히 무시된다.
 					String invocation = group + ":" + artifact + ":" + g + (id == null || id.isBlank() ? "" : "@" + id);
-					addChild(
-						plugin,
-						new MavenGoal(
-							pluginPrefix(artifact) + ":" + g + (id == null || id.isBlank() ? "" : "@" + id),
-							invocation,
-							MavenGoal.Type.EXECUTION,
-							plugin));
+					boolean duplicate = false;
+					for (MavenGoal existing : plugin.getChildren())
+						duplicate |= invocation.equals(existing.getGoal());
+					if (!duplicate)
+						addChild(
+							plugin,
+							new MavenGoal(
+								pluginPrefix(artifact) + ":" + g + (id == null || id.isBlank() ? "" : "@" + id),
+								invocation,
+								MavenGoal.Type.EXECUTION,
+								plugin));
 				}
 			}
 		}
@@ -222,7 +264,7 @@ public final class MavenPomParser
 	}
 
 	/** 주어진 엘리먼트 바로 아래의 {@code <tag>} 자식 텍스트를 읽는다. 없으면 null. (손자 이후의 같은 이름 태그는 무시한다.) */
-	private static String text(Element parent, String tag)
+	static String text(Element parent, String tag)
 	{
 		Element e = directChild(parent, tag);
 		if (e == null)

@@ -191,4 +191,31 @@ class MavenPomParserTest
 		assertTrue(MavenPomParser.profileIds(write("a/pom.xml", "<project><artifactId>a</artifactId></project>")).isEmpty());
 		assertTrue(MavenPomParser.profileIds(write("b/pom.xml", "<project><unclosed>")).isEmpty());
 	}
+
+	@Test
+	void pluginsAreLimitedToBuildAndProfileBuildPlugins() throws Exception
+	{
+		File pom = write("scope/pom.xml", """
+			<project><artifactId>x</artifactId><build>
+			  <pluginManagement><plugins><plugin><artifactId>managed-only</artifactId></plugin></plugins></pluginManagement>
+			  <plugins><plugin><groupId>g</groupId><artifactId>real</artifactId>
+			    <executions><execution><id>a</id><goals><goal>one</goal></goals></execution></executions></plugin></plugins>
+			</build>
+			<reporting><plugins><plugin><artifactId>report-only</artifactId></plugin></plugins></reporting>
+			<profiles><profile><id>p</id><build><plugins>
+			  <plugin><groupId>g</groupId><artifactId>real</artifactId>
+			    <executions><execution><id>a</id><goals><goal>one</goal><goal>two</goal></goals></execution></executions></plugin>
+			  <plugin><groupId>g</groupId><artifactId>profile-only</artifactId></plugin>
+			</plugins></build></profile></profiles></project>
+			""");
+		MavenGoal plugins = child(MavenPomParser.parseProject(pom), "Plugins");
+		List<MavenGoal> list = MavenPomParser.children(plugins);
+		assertEquals(2, list.size(), "pluginManagement/reporting 제외, 같은 플러그인은 하나로 합침");
+		assertEquals("g:real", list.get(0).getName());
+		assertEquals("g:profile-only", list.get(1).getName());
+		List<MavenGoal> execs = MavenPomParser.children(list.get(0));
+		assertEquals(2, execs.size(), "중복 execution은 한 번만, 프로파일에서 추가된 goal은 더해진다");
+		assertEquals("real:one@a", execs.get(0).getName());
+		assertEquals("real:two@a", execs.get(1).getName());
+	}
 }

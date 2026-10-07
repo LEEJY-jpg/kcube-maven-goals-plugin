@@ -12,6 +12,13 @@ Eclipse Plug-in for displaying Maven lifecycle phases and plugin goals in an Ant
 - Refresh from the current selection
 - Eclipse 4.x / Java 17+ target (built with `--release 17`)
 
+## Limitations
+The tree is built by a lightweight reader of each `pom.xml`, **not** from Maven's effective POM, so it can differ from what Maven really runs:
+- Only plug-ins declared in `<build><plugins>` (and in profiles' `<build><plugins>`) are shown. `<pluginManagement>` and `<reporting>` entries are not.
+- `${...}` references are resolved only from the same file: its `<properties>`, `project.*` / `pom.*` (artifactId, groupId, version, name, parent values) and `project.basedir`. Unresolvable references (system/env variables, settings.xml, profile properties) are shown as-is.
+- Plug-ins and executions that come from a **parent POM** or from Maven's default lifecycle bindings are not listed; profile activation is not evaluated.
+- Run such goals from the *Lifecycle* node or with *Run with Options...* when a plug-in you need is not shown.
+
 ## Installation
 Requires Eclipse 2023-09 or later with m2e (included in most Eclipse packages) and Java 17+.
 

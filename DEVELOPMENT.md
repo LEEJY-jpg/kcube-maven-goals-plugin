@@ -111,6 +111,7 @@ src/com/kcube/mavenview/
 ### 11. 멀티 모듈 / 실행 옵션 / 단위 테스트
 - **멀티 모듈**: pom의 `<modules>`를 따라 하위 pom을 재귀 파싱해 `Modules` 폴더 아래 PROJECT 노드로 표시한다. 없는 모듈은 건너뛰고, 순환 참조는 정규 경로로 막는다. 모듈 노드에서 실행하면 해당 모듈의 pom으로 실행된다. (`Remove`는 최상위 프로젝트에만 적용)
 - **Run with Options...**: 노드 우클릭. Goals(편집 가능; PROJECT 노드는 `clean install` 제안), Profiles(`-P`), `-DskipTests`, `-o`, `-U`, 추가 인자. 마지막에 쓴 옵션은 preference에 저장되고, 실행 결과는 최근 목록에도 들어간다. goal 문자열 자체가 옵션을 포함한 명령행이라 외부 mvn은 따옴표를 고려해 인자별로 분리해 실행한다.
+- **파싱 범위와 한계**: 경량 DOM 파서라 effective pom이 아니다. 플러그인은 `<build><plugins>`와 프로파일의 `<build><plugins>`만 읽고(`pluginManagement`/`reporting` 제외, 같은 플러그인은 하나로 합침), `${...}`는 `PomProperties`가 같은 pom의 `<properties>`와 `project.*`/`pom.*`/`project.parent.*`/`basedir`로만 푼다(풀 수 없으면 그대로 둔다). 부모 pom 상속, settings.xml, 환경/시스템 변수, 프로파일 활성 조건 평가는 하지 않는다. 이 한계는 README의 Limitations에도 적혀 있다. 정확한 effective pom이 필요해지면 m2e `MavenProject` 기반 전환을 별도로 검토한다(임포트되지 않은 pom 처리, 부모/의존성 해석 비용이 과제).
 - **POM 파싱 개선**: `<name>`/`<artifactId>`/`<id>` 등을 직접 자식에서만 읽는다(의존성 안의 같은 이름 태그에 속지 않음).
 - **단위 테스트**: `test/` (JUnit 5). `./build.sh --test` 로 실행하거나, `mvn verify`(Tycho)가 `com.kcube.mavenview.tests` fragment로 같은 소스를 실행한다(CI에서도 동일). 새 JUnit 패키지를 import하면 그 fragment의 `META-INF/MANIFEST.MF` Import-Package에도 추가해야 한다. 대상은 `MavenPomParser`, `GoalFilter`(검색 로직, 뷰에서 분리), `RunOptions`. Eclipse에서는 `.classpath`의 `test` 소스 폴더로 Run As > JUnit Test 가능.
 

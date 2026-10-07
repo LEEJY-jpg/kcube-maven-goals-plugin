@@ -92,4 +92,22 @@ class PomRegistryTest
 		registry.register(a);
 		assertTrue(registry.changed().isEmpty(), "다시 파싱하면 변경 없음");
 	}
+
+	@Test
+	void brokenPomIsRetriedOnlyWhenTheFileChangesAgain() throws Exception
+	{
+		PomRegistry registry = new PomRegistry();
+		File a = pom("a", "a");
+		registry.register(a);
+		Files.writeString(a.toPath(), "<project><unclosed>");
+		a.setLastModified(a.lastModified() + 5000);
+		assertEquals(List.of(PomRegistry.key(a)), registry.changed());
+		assertFalse(registry.register(a));
+		assertTrue(registry.changed().isEmpty(), "실패한 같은 파일 상태로는 다시 변경으로 잡히지 않는다(2초마다 재시도/로그 방지)");
+		Files.writeString(a.toPath(), POM.formatted("a-fixed"));
+		a.setLastModified(a.lastModified() + 5000);
+		assertEquals(List.of(PomRegistry.key(a)), registry.changed(), "고쳐서 저장하면 다시 감지된다");
+		assertTrue(registry.register(a));
+		assertTrue(registry.changed().isEmpty());
+	}
 }

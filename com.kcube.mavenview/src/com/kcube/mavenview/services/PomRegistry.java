@@ -65,6 +65,11 @@ public final class PomRegistry
 		catch (Exception e)
 		{
 			PluginLog.log(IStatus.ERROR, "Failed to parse " + pomFile, e);
+			// 기존 트리를 유지하되 지문은 지금 파일 상태로 갱신한다. 그러지 않으면 깨진 pom이 계속 "변경됨"으로 잡혀
+			// 2초마다 같은 실패와 로그, 화면 갱신이 반복된다. 파일이 다시 바뀌면 그때 재시도한다.
+			MavenGoal existing = projects.get(key);
+			if (existing != null)
+				watcher.remember(key, existing);
 			return false;
 		}
 	}
