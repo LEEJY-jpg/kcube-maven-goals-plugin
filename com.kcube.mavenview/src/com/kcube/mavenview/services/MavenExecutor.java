@@ -100,13 +100,13 @@ public final class MavenExecutor
 	{
 		// Eclipse가 실제로 종료될 때 fork된 mvn이 자식으로 남아있지 않도록 회수한다(단, 뷰를 닫는 것은 포함 안 함).
 		try
-			{
+		{
 			Runtime.getRuntime().addShutdownHook(new Thread(MavenExecutor::stopAll, "kcube-maven-shutdown"));
-				}
+		}
 		catch (IllegalStateException ignored)
-			{
-				// JVM이 이미 종료 중이면 추가할 수 없다.
-			}
+		{
+			// JVM이 이미 종료 중이면 추가할 수 없다.
+		}
 	}
 
 	/** 실행 중인 외부 mvn이 있는지 여부. */

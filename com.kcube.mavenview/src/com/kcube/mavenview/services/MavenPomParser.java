@@ -5,6 +5,7 @@ import java.util.List;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.eclipse.core.runtime.IStatus;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
@@ -111,9 +112,10 @@ public final class MavenPomParser
 				if (modulePom.isFile() && !visited.contains(modulePom.getCanonicalPath()))
 					addChild(folder, parseProject(modulePom, folder, visited));
 			}
-			catch (Exception ignored)
+			catch (Exception e)
 			{
 				// 깨진 모듈 pom 하나 때문에 전체 트리를 포기하지 않는다.
+				PluginLog.log(IStatus.WARNING, "Skipping unparsable module pom " + modulePom, e);
 			}
 		}
 		if (!children(folder).isEmpty())
@@ -219,10 +221,10 @@ public final class MavenPomParser
 
 	/**
 	 * XXE를 방지한 문서 빌더를 만든다. DOCTYPE 선언 자체를 금지하고, 지원되는 경우 외부 엔티티 로딩을 꺼낸다.
-	* 일부 파서에서 특정 feature가 unsupported이면 무시하고, 나머지 조치만 유지한다.
-	*/
+	 * 일부 파서에서 특정 feature가 unsupported이면 무시하고, 나머지 조치만 유지한다.
+	 */
 	public static javax.xml.parsers.DocumentBuilder newSecureDocumentBuilder() throws Exception
-		{
+	{
 		DocumentBuilderFactory f = DocumentBuilderFactory.newInstance();
 		f.setNamespaceAware(false);
 		setFeature(f, "http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -230,18 +232,18 @@ public final class MavenPomParser
 		setFeature(f, "http://xml.org/sax/features/external-parameter-entities", false);
 		setFeature(f, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
 		return f.newDocumentBuilder();
-		}
+	}
 
 	/** feature가 현재 파서에서 지원되면 설정하고, 안 되면 조용히 무시한다. */
 	private static void setFeature(DocumentBuilderFactory f, String feature, boolean value)
-		{
+	{
 		try
-			{
+		{
 			f.setFeature(feature, value);
-			}
+		}
 		catch (Exception ignored)
-			{
-				// unsupported feature는 무시. disallow-doctype-decl이 핵심 차단이다.
-			}
+		{
+			// unsupported feature는 무시. disallow-doctype-decl이 핵심 차단이다.
 		}
 	}
+}

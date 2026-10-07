@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.eclipse.core.runtime.IStatus;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -128,9 +129,10 @@ public final class PomScanner
 				}
 			}
 		}
-		catch (Exception ignored)
+		catch (Exception e)
 		{
 			// 깨진 pom은 모듈이 없는 것으로 취급한다.
+			PluginLog.log(IStatus.WARNING, "Cannot read modules from " + pom, e);
 		}
 		return modules;
 	}
