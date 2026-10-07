@@ -5,11 +5,16 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
@@ -191,7 +196,7 @@ public final class MavenExecutor
 
 	/**
 	 * pom 위치에서 부모 디렉터리로 거슬러 올라가며 Maven Wrapper(mvnw / Windows는 mvnw.cmd)를 찾는다. 멀티 모듈에서는 wrapper가 루트에만 있으므로
-	 * 상위까지 탐색한다. 없으면 null.
+	 * 상위까지 탐색한다. 없으면 null. git 체크아웃 직후처럼 실행 권한이 없는 mvnw도 찾아 주며, 그 경우 {@link #needsShell}로 sh를 통해 실행한다.
 	 */
 	static File findWrapper(File pomDir)
 	{
@@ -199,10 +204,16 @@ public final class MavenExecutor
 		for (File dir = pomDir; dir != null; dir = dir.getParentFile())
 		{
 			File candidate = new File(dir, name);
-			if (candidate.isFile() && (WINDOWS || candidate.canExecute()))
+			if (candidate.isFile())
 				return candidate;
 		}
 		return null;
+	}
+
+	/** Unix에서 wrapper에 실행 권한이 없으면 직접 실행할 수 없으므로 {@code sh}로 넘겨 실행해야 한다. */
+	static boolean needsShell(File wrapper)
+	{
+		return !WINDOWS && !wrapper.canExecute();
 	}
 
 	// 외부 Maven(프로젝트의 mvnw 우선, 없으면 preference/PATH의 mvn)을 호출해 실행한다.
@@ -262,7 +273,19 @@ public final class MavenExecutor
 
 				List<String> command = new ArrayList<>();
 				File wrapper = findWrapper(pom.getParentFile());
-				command.add(wrapper != null ? wrapper.getAbsolutePath() : findMaven(loginShellPath));
+				if (wrapper != null)
+				{
+					if (needsShell(wrapper))
+					{
+						out.println(Messages.get("console.wrapper.shell", wrapper.getAbsolutePath()));
+						command.add("/bin/sh");
+					}
+					command.add(wrapper.getAbsolutePath());
+				}
+				else
+				{
+					command.add(findMaven(loginShellPath));
+				}
 				command.add("-f");
 				command.add(pom.getAbsolutePath());
 				// goalString은 "clean install -DskipTests"처럼 옵션이 섞인 명령행일 수 있어 인자별로 나눠 전달한다.
@@ -322,18 +345,52 @@ public final class MavenExecutor
 		}
 	}
 
-	/** 이름이 같은 기존 콘솔을 찾아 돌려주고, 없으면 새로 만들어 등록한다. */
+	/** 이 플러그인이 만든 콘솔의 최대 개수. Run with Options의 자유 입력으로 goal 문자열이 계속 달라져도 콘솔이 무한히 늘지 않게 한다. */
+	private static final int MAX_CONSOLES = 10;
+
+	/** 이 플러그인이 만든 콘솔(이름 → 콘솔), 최근 사용 순. UI 스레드({@link #runExternal})에서만 접근한다. */
+	private static final LinkedHashMap<String, MessageConsole> OWN_CONSOLES = new LinkedHashMap<>(16, 0.75f, true);
+
+	/**
+	 * 이름이 같은 기존 콘솔을 찾아 돌려주고, 없으면 새로 만들어 등록한다. 새로 만들 때 개수가 {@value #MAX_CONSOLES}를 넘으면 가장 오래 쓰지 않은
+	 * 콘솔부터 닫는다(실행 중인 빌드의 콘솔은 닫지 않는다).
+	 */
 	private static MessageConsole consoleFor(String name)
 	{
 		IConsoleManager manager = ConsolePlugin.getDefault().getConsoleManager();
-		for (IConsole existing : manager.getConsoles())
-		{
-			if (existing instanceof MessageConsole mc && name.equals(mc.getName()))
-				return mc;
-		}
+		List<IConsole> open = List.of(manager.getConsoles());
+		// 사용자가 직접 닫은 콘솔은 추적 대상에서 뺀다.
+		OWN_CONSOLES.values().removeIf(c -> !open.contains(c));
+		MessageConsole existing = OWN_CONSOLES.get(name); // 접근 순서 갱신
+		if (existing != null)
+			return existing;
 		MessageConsole console = new MessageConsole(name, null);
 		manager.addConsoles(new IConsole[] {console});
+		OWN_CONSOLES.put(name, console);
+		Set<MessageConsole> busy = new HashSet<>();
+		RUNNING.values().forEach(job -> busy.add(job.console));
+		List<MessageConsole> evicted = evictOldest(OWN_CONSOLES, MAX_CONSOLES, busy::contains);
+		if (!evicted.isEmpty())
+			manager.removeConsoles(evicted.toArray(new IConsole[0]));
 		return console;
+	}
+
+	/**
+	 * 맵(최근 사용 순)이 max개를 넘으면 가장 오래된 항목부터 제거해 돌려준다. busy인 항목은 건너뛰므로, 모두 busy면 max를 넘은 채로 남을 수 있다.
+	 */
+	static <T> List<T> evictOldest(LinkedHashMap<String, T> map, int max, Predicate<T> busy)
+	{
+		List<T> evicted = new ArrayList<>();
+		for (Iterator<T> it = map.values().iterator(); it.hasNext() && map.size() > max;)
+		{
+			T candidate = it.next();
+			if (!busy.test(candidate))
+			{
+				it.remove();
+				evicted.add(candidate);
+			}
+		}
+		return evicted;
 	}
 
 	// GUI로 띄운 앱의 PATH에는 항상 들어 있지는 않은 mvn의 일반적인 설치 위치들.

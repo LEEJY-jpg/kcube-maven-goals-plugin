@@ -1,7 +1,7 @@
 package com.kcube.mavenview.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
@@ -28,12 +28,28 @@ class MavenExecutorTest
 	}
 
 	@Test
-	void ignoresNonExecutableWrapper() throws Exception
+	void findsNonExecutableWrapperAndRunsItWithShell() throws Exception
 	{
 		Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().contains("win"));
-		Files.createFile(tmp.resolve("mvnw")).toFile().setExecutable(false);
-		// 임시 디렉터리 상위(/tmp 등)에 mvnw가 있을 가능성은 사실상 없다.
-		assertNull(MavenExecutor.findWrapper(tmp.toFile()));
+		File mvnw = Files.createFile(tmp.resolve("mvnw")).toFile();
+		mvnw.setExecutable(false);
+		assertEquals(mvnw, MavenExecutor.findWrapper(tmp.toFile()), "실행 권한이 없어도 wrapper는 찾아야 한다");
+		assertTrue(MavenExecutor.needsShell(mvnw));
+		mvnw.setExecutable(true);
+		assertFalse(MavenExecutor.needsShell(mvnw));
+	}
+
+	@Test
+	void evictOldestRemovesLeastRecentlyUsedButSkipsBusy()
+	{
+		java.util.LinkedHashMap<String, String> map = new java.util.LinkedHashMap<>();
+		for (String k : new String[] {"a", "b", "c", "d"})
+			map.put(k, k);
+		java.util.List<String> evicted = MavenExecutor.evictOldest(map, 2, "a"::equals);
+		assertEquals(java.util.List.of("b", "c"), evicted, "a는 실행 중이라 건너뛰고 그다음 오래된 것부터 제거");
+		assertEquals(java.util.List.of("a", "d"), new java.util.ArrayList<>(map.keySet()));
+		assertTrue(MavenExecutor.evictOldest(map, 5, k -> false).isEmpty(), "상한 이하면 아무것도 제거하지 않는다");
+		assertEquals(java.util.List.of(), MavenExecutor.evictOldest(map, 0, k -> true), "전부 실행 중이면 제거하지 않는다");
 	}
 
 	@Test
