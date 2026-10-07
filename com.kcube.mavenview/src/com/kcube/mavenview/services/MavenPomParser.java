@@ -50,6 +50,30 @@ public final class MavenPomParser
 		"install",
 		"deploy"};
 
+	/** pom.xml의 {@code <profiles><profile><id>}를 선언 순서대로 반환한다(이 pom에 직접 선언된 것만). 읽을 수 없으면 빈 목록. */
+	public static List<String> profileIds(File pom)
+	{
+		List<String> ids = new java.util.ArrayList<>();
+		try
+		{
+			Element profiles = directChild(newSecureDocumentBuilder().parse(pom).getDocumentElement(), "profiles");
+			if (profiles != null)
+			{
+				for (Element profile : directChildren(profiles, "profile"))
+				{
+					String id = text(profile, "id");
+					if (id != null && !id.isBlank() && !ids.contains(id))
+						ids.add(id);
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			PluginLog.log(IStatus.WARNING, "Cannot read profiles from " + pom, e);
+		}
+		return ids;
+	}
+
 	/** pom.xml을 파싱해 Lifecycle/Plugins를 자식으로 가진 PROJECT 루트 노드를 만든다. */
 	public static MavenGoal parseProject(File pom) throws Exception
 	{

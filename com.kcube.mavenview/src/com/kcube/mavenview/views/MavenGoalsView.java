@@ -685,7 +685,12 @@ public final class MavenGoalsView extends ViewPart
 			return;
 		RunOptions last = ViewPreferences.loadRunOptions();
 		String initialGoals = g.getType() == MavenGoal.Type.PROJECT ? "clean install" : MavenExecutor.goalString(g);
-		RunOptionsDialog dialog = new RunOptionsDialog(viewer.getControl().getShell(), g.getName(), initialGoals, last);
+		RunOptionsDialog dialog = new RunOptionsDialog(
+			viewer.getControl().getShell(),
+			g.getName(),
+			initialGoals,
+			last,
+			MavenPomParser.profileIds(pom));
 		if (dialog.open() != Window.OK)
 			return;
 		RunOptions chosen = dialog.getOptions();

@@ -1,0 +1,17 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: KCube Maven Goals Tests
+Bundle-SymbolicName: com.kcube.mavenview.tests
+Bundle-Version: 1.0.1
+Bundle-Vendor: KCube
+Fragment-Host: com.kcube.mavenview
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Import-Package: org.junit.jupiter.api,
+ org.junit.jupiter.api.io,
+ org.opentest4j,
+ org.junit.platform.commons,
+ org.junit.platform.commons.support,
+ org.junit.platform.engine.discovery,
+ org.junit.platform.launcher,
+ org.junit.platform.launcher.core,
+ org.junit.platform.launcher.listeners

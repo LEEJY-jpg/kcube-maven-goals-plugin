@@ -33,6 +33,7 @@ Requires Eclipse 2023-09 or later with m2e (included in most Eclipse packages) a
 
 ## Project layout
 - `com.kcube.mavenview/` — the plug-in bundle (sources, `plugin.xml`, icons, tests)
+- `com.kcube.mavenview.tests/` — unit-test fragment (runs the sources in `com.kcube.mavenview/test/` during `mvn verify`; not shipped)
 - `com.kcube.mavenview.feature/` — Eclipse feature
 - `com.kcube.mavenview.update-site/` — p2 update site (`category.xml`)
 

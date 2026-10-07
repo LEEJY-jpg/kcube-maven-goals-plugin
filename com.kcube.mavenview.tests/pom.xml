@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.kcube</groupId>
+        <artifactId>kcube-maven-goals-plugin-parent</artifactId>
+        <version>1.0.1</version>
+    </parent>
+    <artifactId>com.kcube.mavenview.tests</artifactId>
+    <packaging>eclipse-test-plugin</packaging>
+
+    <!-- 테스트 소스는 플러그인 번들의 test/ 폴더를 그대로 쓴다(build.sh 의 test 모드와 같은 소스). 이 fragment 는 배포물(feature)에 포함되지 않는다. -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.eclipse.tycho</groupId>
+                <artifactId>tycho-surefire-plugin</artifactId>
+                <version>${tycho.version}</version>
+                <configuration>
+                    <useUIHarness>false</useUIHarness>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

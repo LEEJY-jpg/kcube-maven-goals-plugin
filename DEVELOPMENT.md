@@ -9,6 +9,7 @@ Tycho 멀티 모듈 프로젝트다.
 ```
 pom.xml                          부모 pom (Tycho, Eclipse 2023-09 p2 리포지토리)
 com.kcube.mavenview/             플러그인 번들 (eclipse-plugin) — 소스, plugin.xml, icons, test
+com.kcube.mavenview.tests/       단위 테스트 fragment (eclipse-test-plugin) — 번들의 test/ 소스를 mvn verify에서 실행, 배포 제외
 com.kcube.mavenview.feature/     Feature (eclipse-feature)
 com.kcube.mavenview.update-site/ p2 업데이트 사이트 (eclipse-repository, category.xml)
 build.sh                         Eclipse 설치본 기반 빠른 jar 빌드 (dropins 용)
@@ -111,7 +112,7 @@ src/com/kcube/mavenview/
 - **멀티 모듈**: pom의 `<modules>`를 따라 하위 pom을 재귀 파싱해 `Modules` 폴더 아래 PROJECT 노드로 표시한다. 없는 모듈은 건너뛰고, 순환 참조는 정규 경로로 막는다. 모듈 노드에서 실행하면 해당 모듈의 pom으로 실행된다. (`Remove`는 최상위 프로젝트에만 적용)
 - **Run with Options...**: 노드 우클릭. Goals(편집 가능; PROJECT 노드는 `clean install` 제안), Profiles(`-P`), `-DskipTests`, `-o`, `-U`, 추가 인자. 마지막에 쓴 옵션은 preference에 저장되고, 실행 결과는 최근 목록에도 들어간다. goal 문자열 자체가 옵션을 포함한 명령행이라 외부 mvn은 따옴표를 고려해 인자별로 분리해 실행한다.
 - **POM 파싱 개선**: `<name>`/`<artifactId>`/`<id>` 등을 직접 자식에서만 읽는다(의존성 안의 같은 이름 태그에 속지 않음).
-- **단위 테스트**: `test/` (JUnit 5). `./build.sh --test` 로 실행. 대상은 `MavenPomParser`, `GoalFilter`(검색 로직, 뷰에서 분리), `RunOptions`. Eclipse에서는 `.classpath`의 `test` 소스 폴더로 Run As > JUnit Test 가능.
+- **단위 테스트**: `test/` (JUnit 5). `./build.sh --test` 로 실행하거나, `mvn verify`(Tycho)가 `com.kcube.mavenview.tests` fragment로 같은 소스를 실행한다(CI에서도 동일). 새 JUnit 패키지를 import하면 그 fragment의 `META-INF/MANIFEST.MF` Import-Package에도 추가해야 한다. 대상은 `MavenPomParser`, `GoalFilter`(검색 로직, 뷰에서 분리), `RunOptions`. Eclipse에서는 `.classpath`의 `test` 소스 폴더로 Run As > JUnit Test 가능.
 
 ### 12. 다국어(영어 기본 / 한국어·일본어·중국어)
 - 기본은 영어, Eclipse 로케일이 한국어/일본어/중국어(`-nl ko|ja|zh`, 또는 OS 언어)면 해당 언어로 표시한다. 중국어는 간체 기준이며 번체(zh_TW) 환경에서도 같은 파일을 쓴다. 지원하지 않는 언어는 영어.

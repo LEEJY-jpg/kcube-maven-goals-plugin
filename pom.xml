@@ -23,6 +23,7 @@
 
     <modules>
         <module>com.kcube.mavenview</module>
+        <module>com.kcube.mavenview.tests</module>
         <module>com.kcube.mavenview.feature</module>
         <module>com.kcube.mavenview.update-site</module>
     </modules>

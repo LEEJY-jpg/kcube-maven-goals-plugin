@@ -175,4 +175,20 @@ class MavenPomParserTest
 		assertEquals("spring-boot", MavenPomParser.pluginPrefix("spring-boot-maven-plugin"));
 		assertEquals("foo-plugin", MavenPomParser.pluginPrefix("foo-plugin"));
 	}
+
+	@Test
+	void readsDeclaredProfileIds() throws Exception
+	{
+		File pom = write("p/pom.xml", "<project><modelVersion>4.0.0</modelVersion><artifactId>p</artifactId>"
+			+ "<profiles><profile><id>dev</id></profile><profile><id> prod </id></profile>"
+			+ "<profile><id>dev</id></profile><profile><activation/></profile></profiles></project>");
+		assertEquals(List.of("dev", "prod"), MavenPomParser.profileIds(pom), "중복/id 없는 profile 제외");
+	}
+
+	@Test
+	void profileIdsIsEmptyWithoutProfilesOrOnBrokenPom() throws Exception
+	{
+		assertTrue(MavenPomParser.profileIds(write("a/pom.xml", "<project><artifactId>a</artifactId></project>")).isEmpty());
+		assertTrue(MavenPomParser.profileIds(write("b/pom.xml", "<project><unclosed>")).isEmpty());
+	}
 }
