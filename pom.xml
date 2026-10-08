@@ -19,6 +19,8 @@
         <tycho.version>4.0.13</tycho.version>
         <eclipse.release>2023-09</eclipse.release> <!-- Eclipse 4.29 -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <!-- 배포 저장소가 없으므로 deploy 골은 건너뛴다 (distributionManagement 오류 방지) -->
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
     <modules>
