@@ -4,6 +4,7 @@ bin/
 bin-test/
 /out/
 target/
+.settings/
 
 # OS
 .DS_Store
