@@ -210,8 +210,8 @@ final class ViewToolbar
 		toolbar.add(favorites);
 		toolbar.add(updateProject);
 		toolbar.add(new Separator());
-		toolbar.add(add);
-		toolbar.add(addFromSelection);
+		// toolbar.add(add); // 디스크의 pom.xml 등록 버튼 (숨김)
+		// toolbar.add(addFromSelection); // 프로젝트에서 등록해주는 기능 숨김 
 		toolbar.add(remove);
 		toolbar.add(refresh);
 		toolbar.add(new Separator());
