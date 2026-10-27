@@ -16,6 +16,7 @@ import org.eclipse.jface.action.Action;
 import org.eclipse.jface.action.MenuManager;
 import org.eclipse.jface.action.Separator;
 import org.eclipse.jface.viewers.AbstractTreeViewer;
+import org.eclipse.jface.viewers.ColumnViewerToolTipSupport;
 import org.eclipse.jface.viewers.IStructuredSelection;
 import org.eclipse.jface.viewers.ITreeContentProvider;
 import org.eclipse.jface.viewers.TreeViewer;
@@ -266,6 +267,7 @@ public final class MavenGoalsView extends ViewPart
 			}
 		});
 		viewer.setLabelProvider(new MavenGoalLabelProvider(this::isFavorite));
+		ColumnViewerToolTipSupport.enableFor(viewer);
 		viewer.addDoubleClickListener(e -> activateSelected());
 		viewer.addFilter(new ViewerFilter()
 		{

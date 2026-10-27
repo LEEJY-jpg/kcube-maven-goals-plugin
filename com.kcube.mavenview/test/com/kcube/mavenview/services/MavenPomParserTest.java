@@ -108,6 +108,35 @@ class MavenPomParserTest
 	}
 
 	@Test
+	void addsKnownGoalsAfterExecutionGoals() throws Exception
+	{
+		File pom = write("known/pom.xml", """
+			<project><artifactId>x</artifactId><build><plugins>
+			  <plugin><artifactId>maven-war-plugin</artifactId>
+			    <executions><execution><goals><goal>exploded</goal></goals></execution>
+			      <execution><id>copy</id><goals><goal>exploded</goal></goals></execution></executions></plugin>
+			</plugins></build></project>
+			""");
+		MavenGoal war = child(child(MavenPomParser.parseProject(pom), "Plugins"), "org.apache.maven.plugins:maven-war-plugin");
+		List<String> names = MavenPomParser.children(war).stream().map(MavenGoal::getName).toList();
+		assertEquals(List.of("war:exploded", "war:exploded@copy", "war:war", "war:inplace"), names, "id 없는 execution과 같은 goal은 한 번만");
+		assertEquals("org.apache.maven.plugins:maven-war-plugin:war", MavenPomParser.children(war).get(2).getGoal());
+		assertEquals(MavenGoal.Type.EXECUTION, MavenPomParser.children(war).get(2).getType());
+	}
+
+	@Test
+	void warPackagingShowsWarPluginWithoutDeclaration() throws Exception
+	{
+		File war = write("w/pom.xml", "<project><artifactId>w</artifactId><packaging>war</packaging></project>");
+		MavenGoal plugin = child(child(MavenPomParser.parseProject(war), "Plugins"), "org.apache.maven.plugins:maven-war-plugin");
+		assertNotNull(plugin);
+		assertNotNull(child(plugin, "war:exploded"));
+
+		File jar = write("j/pom.xml", "<project><artifactId>j</artifactId></project>");
+		assertTrue(MavenPomParser.children(child(MavenPomParser.parseProject(jar), "Plugins")).isEmpty());
+	}
+
+	@Test
 	void parsesModulesRecursively() throws Exception
 	{
 		File parent = write(

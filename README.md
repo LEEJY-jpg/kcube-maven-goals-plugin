@@ -6,6 +6,8 @@ Eclipse Plug-in for displaying Maven lifecycle phases and plugin goals in an Ant
 - Detect selected Eclipse Maven project / pom.xml
 - Display Maven lifecycle phases
 - Display Maven plugins and configured executions
+- Common goals of well-known plug-ins (e.g. `war:exploded`, `dependency:tree`, `spring-boot:run`) are listed even without an `<execution>`; `war`/`ear` packaging shows the WAR/EAR plug-in even when it is not declared
+- Hover over a node to see what the phase/goal does (English, Korean, Japanese, Chinese)
 - Double-click a lifecycle phase or plugin goal to run Maven
 - Run Maven through the local `mvn` executable
 - Output Maven stdout/stderr to an Eclipse Console

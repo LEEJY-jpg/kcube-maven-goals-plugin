@@ -3,17 +3,18 @@ package com.kcube.mavenview.views;
 import java.util.function.Predicate;
 
 import org.eclipse.jface.resource.JFaceResources;
-import org.eclipse.jface.viewers.IFontProvider;
-import org.eclipse.jface.viewers.LabelProvider;
+import org.eclipse.jface.viewers.ColumnLabelProvider;
 import org.eclipse.swt.graphics.Font;
 
 import com.kcube.mavenview.model.MavenGoal;
+import com.kcube.mavenview.services.GoalDescriptions;
 
 /**
- * 트리 노드의 표시 텍스트/글꼴. 플러그인 항목은 getArguments()에 [groupId, artifactId]를 담고 있고,
- * 긴 org.apache.maven.plugins:... 형태의 id도 읽기 쉽도록 artifactId만 (굵게) 표시한다.
+ * 트리 노드의 표시 텍스트/글꼴/툴팁. 플러그인 항목은 getArguments()에 [groupId, artifactId]를 담고 있고,
+ * 긴 org.apache.maven.plugins:... 형태의 id도 읽기 쉽도록 artifactId만 (굵게) 표시한다. 툴팁은 뷰에서
+ * ColumnViewerToolTipSupport 를 켜야 표시된다.
  */
-final class MavenGoalLabelProvider extends LabelProvider implements IFontProvider
+final class MavenGoalLabelProvider extends ColumnLabelProvider
 {
 	private final Font boldFont = JFaceResources.getFontRegistry().getBold(JFaceResources.DEFAULT_FONT);
 	/** 즐겨찾기 여부 판정기. 즐겨찾기 노드에는 별 표시를 붙인다. */
@@ -41,6 +42,13 @@ final class MavenGoalLabelProvider extends LabelProvider implements IFontProvide
 	public Font getFont(Object element)
 	{
 		return element instanceof MavenGoal g && isPluginEntry(g) ? boldFont : null;
+	}
+
+	/** 마우스를 올렸을 때 보여 줄 노드 설명(phase/goal의 기능, 실행 문자열 등). */
+	@Override
+	public String getToolTipText(Object element)
+	{
+		return element instanceof MavenGoal g ? GoalDescriptions.describe(g) : null;
 	}
 
 	/** 노드가 [groupId, artifactId]를 가진 개별 플러그인 항목인지 확인한다. */

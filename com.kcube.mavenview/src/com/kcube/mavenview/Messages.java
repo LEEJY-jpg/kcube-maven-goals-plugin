@@ -30,6 +30,12 @@ public final class Messages
 		return TEXTS.getProperty(key, key);
 	}
 
+	/** 키에 해당하는 문자열을 반환한다. 없으면 null(선택적으로 붙이는 설명처럼 없으면 생략할 문자열용). */
+	public static String find(String key)
+	{
+		return TEXTS.getProperty(key);
+	}
+
 	/** 키에 해당하는 문자열을 {@link MessageFormat} 규칙({0}, {1} ...)으로 채워 반환한다. */
 	public static String get(String key, Object... args)
 	{

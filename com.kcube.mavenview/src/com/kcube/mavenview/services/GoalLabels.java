@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 public final class GoalLabels
 {
 	/** "groupId:artifactId:goal" 또는 "groupId:artifactId:goal@executionId" 형태의 단일 토큰. */
-	private static final Pattern PLUGIN_GOAL = Pattern.compile("^[^:\\s]+:([^:\\s]+):([^@\\s]+)(?:@(\\S+))?$");
+	static final Pattern PLUGIN_GOAL = Pattern.compile("^[^:\\s]+:([^:\\s]+):([^@\\s]+)(?:@(\\S+))?$");
 
 	/** 유틸리티 클래스이므로 인스턴스를 만들 수 없다. */
 	private GoalLabels()

@@ -111,7 +111,7 @@ public final class MavenPomParser
 
 		MavenGoal plugins = new MavenGoal("Plugins", null, MavenGoal.Type.PLUGIN, projectRoot);
 		addChild(projectRoot, plugins);
-		parsePlugins(plugins, declaredPlugins(project), props);
+		parsePlugins(plugins, declaredPlugins(project), props, props.resolve(text(project, "packaging")));
 
 		parseModules(projectRoot, pom, project, visited, props);
 
@@ -202,11 +202,21 @@ public final class MavenPomParser
 		return plugins == null ? List.of() : directChildren(plugins, "plugin");
 	}
 
+	/** groupId를 생략한 플러그인 선언이 속하는 Maven 기본 플러그인 그룹. */
+	private static final String DEFAULT_GROUP = "org.apache.maven.plugins";
+
+	/** pom에 선언하지 않아도 packaging 때문에 빌드에 쓰이는 플러그인. 그 goal(예: war:exploded)을 보여 주려고 선언이 없으면 노드를 만든다. */
+	private static final java.util.Map<String, String> PACKAGING_PLUGINS = java.util.Map.of(
+		"war",
+		"maven-war-plugin",
+		"ear",
+		"maven-ear-plugin");
+
 	/**
 	 * 플러그인 선언들을 읽어 "Plugins" 노드 아래에 플러그인별 하위 트리를 만든다. 같은 플러그인이 기본 빌드와 프로파일에 함께 선언돼 있으면
-	 * 노드는 하나로 합치고 execution만 더한다.
+	 * 노드는 하나로 합치고 execution만 더한다. 끝으로 잘 알려진 플러그인에는 {@link KnownGoals}의 대표 goal을 덧붙인다.
 	 */
-	private static void parsePlugins(MavenGoal plugins, List<Element> declarations, PomProperties props)
+	private static void parsePlugins(MavenGoal plugins, List<Element> declarations, PomProperties props, String packaging)
 	{
 		java.util.Map<String, MavenGoal> byId = new java.util.HashMap<>();
 		for (Element p : declarations)
@@ -216,15 +226,9 @@ public final class MavenPomParser
 				continue; // artifactId 없는(= 유효하지 않은) plugin 선언은 건너뜀
 			String group = props.resolve(text(p, "groupId"));
 			if (group == null)
-				group = "org.apache.maven.plugins"; // groupId 생략 시 Maven 기본 플러그인으로 간주
+				group = DEFAULT_GROUP; // groupId 생략 시 Maven 기본 플러그인으로 간주
 
-			MavenGoal plugin = byId.get(group + ":" + artifact);
-			if (plugin == null)
-			{
-				plugin = new MavenGoal(group + ":" + artifact, null, MavenGoal.Type.PLUGIN, plugins, group, artifact);
-				addChild(plugins, plugin);
-				byId.put(group + ":" + artifact, plugin);
-			}
+			MavenGoal plugin = pluginNode(plugins, byId, group, artifact);
 
 			// 플러그인에 바인딩된 execution들을 실행 가능한 goal 노드로 펼친다.
 			NodeList executions = p.getElementsByTagName("execution");
@@ -233,30 +237,53 @@ public final class MavenPomParser
 				Element e = (Element) executions.item(j);
 				String id = props.resolve(text(e, "id"));
 				NodeList goals = e.getElementsByTagName("goal");
-			for (int k = 0; k < goals.getLength(); k++)
+				for (int k = 0; k < goals.getLength(); k++)
 				{
-				String raw = goals.item(k).getTextContent();
-				if (raw == null || raw.isBlank())
-					continue;
-				String g = props.resolve(raw.trim());
-					// "plugin:goal@executionId"(Maven 3.3.1+)는 해당 execution 자신의
-					// <configuration>으로 실행한다. 그냥 "plugin:goal"로 실행하면 플러그인의 default-cli
-					// 실행이 돌아가 execution 블록은 완전히 무시된다.
-					String invocation = group + ":" + artifact + ":" + g + (id == null || id.isBlank() ? "" : "@" + id);
-					boolean duplicate = false;
-					for (MavenGoal existing : plugin.getChildren())
-						duplicate |= invocation.equals(existing.getGoal());
-					if (!duplicate)
-						addChild(
-							plugin,
-							new MavenGoal(
-								pluginPrefix(artifact) + ":" + g + (id == null || id.isBlank() ? "" : "@" + id),
-								invocation,
-								MavenGoal.Type.EXECUTION,
-								plugin));
+					String raw = goals.item(k).getTextContent();
+					if (raw == null || raw.isBlank())
+						continue;
+					addGoal(plugin, group, artifact, props.resolve(raw.trim()), id);
 				}
 			}
 		}
+
+		String implicit = packaging == null ? null : PACKAGING_PLUGINS.get(packaging.trim());
+		if (implicit != null)
+			pluginNode(plugins, byId, DEFAULT_GROUP, implicit);
+
+		// execution으로 바인딩된 goal 뒤에, execution 없이도 실행할 만한 대표 goal을 default-cli 실행으로 덧붙인다.
+		for (MavenGoal plugin : plugins.getChildren())
+		{
+			String[] ga = plugin.getArguments();
+			for (String g : KnownGoals.of(ga[1]))
+				addGoal(plugin, ga[0], ga[1], g, null);
+		}
+	}
+
+	/** group:artifact 플러그인 노드를 찾고, 없으면 만들어 "Plugins" 노드 아래에 추가한다. */
+	private static MavenGoal pluginNode(MavenGoal plugins, java.util.Map<String, MavenGoal> byId, String group, String artifact)
+	{
+		return byId.computeIfAbsent(group + ":" + artifact, key -> {
+			MavenGoal plugin = new MavenGoal(key, null, MavenGoal.Type.PLUGIN, plugins, group, artifact);
+			addChild(plugins, plugin);
+			return plugin;
+		});
+	}
+
+	/** 플러그인 노드 아래에 실행 가능한 goal 노드를 추가한다. 같은 실행 문자열의 노드가 이미 있으면 건너뛴다. */
+	private static void addGoal(MavenGoal plugin, String group, String artifact, String goal, String id)
+	{
+		// "plugin:goal@executionId"(Maven 3.3.1+)는 해당 execution 자신의
+		// <configuration>으로 실행한다. 그냥 "plugin:goal"로 실행하면 플러그인의 default-cli
+		// 실행이 돌아가 execution 블록은 완전히 무시된다.
+		String suffix = id == null || id.isBlank() ? "" : "@" + id;
+		String invocation = group + ":" + artifact + ":" + goal + suffix;
+		for (MavenGoal existing : plugin.getChildren())
+		{
+			if (invocation.equals(existing.getGoal()))
+				return;
+		}
+		addChild(plugin, new MavenGoal(pluginPrefix(artifact) + ":" + goal + suffix, invocation, MavenGoal.Type.EXECUTION, plugin));
 	}
 
 	/** artifactId에서 CLI용 플러그인 접두사를 구한다. maven-X-plugin, X-maven-plugin은 X, 그 외는 artifactId 그대로. */
