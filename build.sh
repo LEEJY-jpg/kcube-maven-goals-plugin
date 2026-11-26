@@ -48,7 +48,8 @@ echo "compile (--release 17) ..."
 cp -R icons "$BUILD/icons"; cp plugin.xml plugin*.properties "$BUILD/"
 (cd src && find . -type f ! -name '*.java' -exec sh -c 'mkdir -p "$1/$(dirname "$2")" && cp "$2" "$1/$2"' _ "$BUILD" {} \;)
 mkdir -p "$ROOT/dist"
-sed "s/^\(Bundle-Version: .*\)\.qualifier\(\r\)\{0,1\}$/\1.${QUALIFIER}\2/" META-INF/MANIFEST.MF > "$BUILD/MANIFEST.MF"
+# MANIFEST 의 버전에 .qualifier 가 있든 없든 "버전.QUALIFIER" 로 바꾼다(줄 끝의 CR 은 유지).
+sed "s/^Bundle-Version: [^[:cntrl:]]*/Bundle-Version: ${VERSION}.${QUALIFIER}/" META-INF/MANIFEST.MF > "$BUILD/MANIFEST.MF"
 "$JAR" --create --file "$OUT" --manifest "$BUILD/MANIFEST.MF" -C "$BUILD" com -C "$BUILD" icons -C "$BUILD" plugin.xml -C "$BUILD" plugin.properties -C "$BUILD" plugin_ko.properties -C "$BUILD" plugin_ja.properties -C "$BUILD" plugin_zh.properties
 echo "built: $OUT (Bundle-Version ${VERSION}.${QUALIFIER})"
 
