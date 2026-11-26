@@ -1,6 +1,7 @@
 package com.kcube.mavenview.views;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -68,6 +69,7 @@ public final class MavenGoalsView extends ViewPart
 	private static final String MEMENTO_EXPANDED = "expanded";
 	private static final String MEMENTO_PATH = "path";
 	private static final String MEMENTO_FILTER = "filter";
+	private static final String MEMENTO_FAVORITES_COLLAPSED = "favoritesCollapsed";
 	/** 트리 기본 펼침 깊이: 프로젝트 루트(1) → Lifecycle/Plugins(2)까지 보이도록 펼친다. */
 	private static final int TOP_LEVEL_EXPAND_DEPTH = 2;
 
@@ -138,6 +140,8 @@ public final class MavenGoalsView extends ViewPart
 		}
 		IMemento tree = memento.createChild(MEMENTO_TREE);
 		tree.putString(MEMENTO_FILTER, filterBox.getText());
+		tree.putBoolean(MEMENTO_FAVORITES_COLLAPSED,
+			!history.favorites().isEmpty() && !viewer.getExpandedState(FavoriteNode.Folder.INSTANCE));
 		for (String path : TreeExpansion.expandedPaths(viewer))
 			tree.createChild(MEMENTO_EXPANDED).putString(MEMENTO_PATH, path);
 	}
@@ -171,12 +175,21 @@ public final class MavenGoalsView extends ViewPart
 		try
 		{
 			viewer.collapseAll();
-			viewer.setExpandedElements(toExpand.toArray());
+			setExpanded(toExpand, !Boolean.TRUE.equals(tree.getBoolean(MEMENTO_FAVORITES_COLLAPSED)));
 		}
 		finally
 		{
 			viewer.getControl().setRedraw(true);
 		}
+	}
+
+	/** 주어진 노드들을 펼친다. 즐겨찾기 폴더는 경로 목록에 없으므로 펼침 여부를 따로 받는다. */
+	private void setExpanded(List<MavenGoal> nodes, boolean favoritesExpanded)
+	{
+		List<Object> elements = new ArrayList<>(nodes);
+		if (favoritesExpanded)
+			elements.add(FavoriteNode.Folder.INSTANCE);
+		viewer.setExpandedElements(elements.toArray());
 	}
 
 	/** 뷰의 UI를 구성한다. 검색창과 트리를 만들고, 콘텐츠/라벨 프로바이더·필터·드래그앤드롭·툴바를 설정한 뒤 저장된 pom.xml 목록을 불러온다. */
@@ -228,30 +241,43 @@ public final class MavenGoalsView extends ViewPart
 			@Override
 			public Object[] getElements(Object input)
 			{
-				// 최상위 PROJECT 노드들을 이름순으로 정렬해 보여준다.
-				return registry.roots().stream().sorted(
-					Comparator.comparing(MavenGoal::getName, String.CASE_INSENSITIVE_ORDER)).toArray();
+				// 즐겨찾기가 있으면 즐겨찾기 폴더를 항상 맨 위에 두고, 그 아래에 PROJECT 노드들을 이름순으로 보여준다.
+				List<Object> elements = new ArrayList<>();
+				if (!history.favorites().isEmpty())
+					elements.add(FavoriteNode.Folder.INSTANCE);
+				registry.roots().stream()
+					.sorted(Comparator.comparing(MavenGoal::getName, String.CASE_INSENSITIVE_ORDER))
+					.forEach(elements::add);
+				return elements.toArray();
 			}
 
 			/** 노드의 자식(Lifecycle/Plugins/goal 등) 목록을 반환한다. */
 			@Override
 			public Object[] getChildren(Object parent)
 			{
-				return MavenPomParser.children((MavenGoal) parent).toArray();
+				if (parent == FavoriteNode.Folder.INSTANCE)
+					return history.favorites().stream().map(FavoriteNode::new).toArray();
+				if (parent instanceof MavenGoal g)
+					return MavenPomParser.children(g).toArray();
+				return new Object[0];
 			}
 
 			/** 노드의 부모를 반환한다. */
 			@Override
 			public Object getParent(Object element)
 			{
-				return ((MavenGoal) element).getParent();
+				if (element instanceof FavoriteNode)
+					return FavoriteNode.Folder.INSTANCE;
+				return element instanceof MavenGoal g ? g.getParent() : null;
 			}
 
 			/** 노드가 자식을 갖고 있는지 반환한다. */
 			@Override
 			public boolean hasChildren(Object element)
 			{
-				return !MavenPomParser.children((MavenGoal) element).isEmpty();
+				if (element == FavoriteNode.Folder.INSTANCE)
+					return !history.favorites().isEmpty();
+				return element instanceof MavenGoal g && !MavenPomParser.children(g).isEmpty();
 			}
 
 			/** 해제할 리소스가 없어 아무 동작도 하지 않는다. */
@@ -266,7 +292,7 @@ public final class MavenGoalsView extends ViewPart
 			{
 			}
 		});
-		viewer.setLabelProvider(new MavenGoalLabelProvider(this::isFavorite));
+		viewer.setLabelProvider(new MavenGoalLabelProvider(this::isFavorite, this::entryLabel));
 		ColumnViewerToolTipSupport.enableFor(viewer);
 		viewer.addDoubleClickListener(e -> activateSelected());
 		viewer.addFilter(new ViewerFilter()
@@ -275,7 +301,13 @@ public final class MavenGoalsView extends ViewPart
 			@Override
 			public boolean select(Viewer v, Object parentElement, Object element)
 			{
-				return filterText.isEmpty() || visibleNodes().contains(element);
+				if (filterText.isEmpty())
+					return true;
+				if (element == FavoriteNode.Folder.INSTANCE)
+					return history.favorites().stream().anyMatch(MavenGoalsView.this::matchesFilter);
+				if (element instanceof FavoriteNode f)
+					return matchesFilter(f.entry());
+				return visibleNodes().contains(element);
 			}
 		});
 		filterBox.addModifyListener(e -> scheduleFilter(filterBox));
@@ -418,11 +450,12 @@ public final class MavenGoalsView extends ViewPart
 		parseAsync(keys.stream().map(registry::fileOf).toList(), true, () -> {
 			// 아직 화면의 노드는 옛 객체이므로 지금 펼쳐진 상태를 읽을 수 있다(반영 후 refresh 전). 파싱 중에 사용자가 펼친 것도 반영된다.
 			Set<String> expanded = TreeExpansion.expandedPaths(viewer);
+			boolean favoritesExpanded = viewer.getExpandedState(FavoriteNode.Folder.INSTANCE);
 			viewer.getControl().setRedraw(false);
 			try
 			{
 				viewer.refresh();
-				viewer.setExpandedElements(TreeExpansion.find(registry.roots(), expanded).toArray());
+				setExpanded(TreeExpansion.find(registry.roots(), expanded), favoritesExpanded);
 			}
 			finally
 			{
@@ -505,6 +538,13 @@ public final class MavenGoalsView extends ViewPart
 	{
 		viewer.collapseAll();
 		viewer.expandToLevel(TOP_LEVEL_EXPAND_DEPTH);
+	}
+
+	/** 즐겨찾기 항목의 표시 라벨이나 실행 문자열이 검색어를 포함하는지 본다. */
+	private boolean matchesFilter(String entry)
+	{
+		return entryLabel(entry).toLowerCase().contains(filterText)
+			|| GoalHistory.goalOf(entry).toLowerCase().contains(filterText);
 	}
 
 	/** 현재 검색어에 대해 보여줄 노드 집합을 반환한다. 필요할 때 한 번만 계산해 캐시한다. */
@@ -604,6 +644,11 @@ public final class MavenGoalsView extends ViewPart
 	private void activateSelected()
 	{
 		if (viewer.getSelection() instanceof IStructuredSelection ss
+			&& ss.getFirstElement() == FavoriteNode.Folder.INSTANCE)
+		{
+			viewer.setExpandedState(FavoriteNode.Folder.INSTANCE, !viewer.getExpandedState(FavoriteNode.Folder.INSTANCE));
+		}
+		else if (viewer.getSelection() instanceof IStructuredSelection ss
 			&& ss.getFirstElement() instanceof MavenGoal g
 			&& g.getGoal() == null
 			&& !MavenPomParser.children(g).isEmpty())
@@ -621,6 +666,12 @@ public final class MavenGoalsView extends ViewPart
 	 */
 	private void runSelectedGoal()
 	{
+		FavoriteNode favorite = selectedFavorite();
+		if (favorite != null)
+		{
+			runEntry(favorite.entry());
+			return;
+		}
 		if (viewer.getSelection() instanceof IStructuredSelection ss
 			&& ss.getFirstElement() instanceof MavenGoal g
 			&& g.getGoal() != null)
@@ -632,6 +683,13 @@ public final class MavenGoalsView extends ViewPart
 				MavenExecutor.run(pom, g, useExternalMvn);
 			}
 		}
+	}
+
+	/** 트리에서 선택된 즐겨찾기 항목. 선택이 즐겨찾기 항목이 아니면 null. */
+	private FavoriteNode selectedFavorite()
+	{
+		return viewer.getSelection() instanceof IStructuredSelection ss && ss.getFirstElement() instanceof FavoriteNode f
+			? f : null;
 	}
 
 	/** 즐겨찾기/최근 실행 항목 문자열("pom경로\tgoal")을 만든다. */
@@ -671,10 +729,33 @@ public final class MavenGoalsView extends ViewPart
 		File pom = g.resolvePomFile();
 		if (pom == null || g.getGoal() == null)
 			return;
-		history.toggleFavorite(entry(pom, g));
+		toggleFavorite(entry(pom, g));
+	}
+
+	/** 항목의 즐겨찾기를 토글하고 저장한 뒤 트리를 갱신한다. */
+	private void toggleFavorite(String entry)
+	{
+		boolean first = history.favorites().isEmpty();
+		history.toggleFavorite(entry);
 		saveGoalLists();
 		viewer.refresh();
+		// 첫 즐겨찾기를 추가해 폴더가 새로 생겼으면 펼쳐서 바로 보이게 한다.
+		if (first)
+			viewer.setExpandedState(FavoriteNode.Folder.INSTANCE, true);
 		updateFavoritesIcon();
+	}
+
+	/** 선택한 즐겨찾기 항목을 즐겨찾기에서 빼는 메뉴 Action을 만든다. */
+	private Action removeFavoriteAction(FavoriteNode favorite)
+	{
+		return new Action(Messages.get("favorites.remove"))
+		{
+			@Override
+			public void run()
+			{
+				toggleFavorite(favorite.entry());
+			}
+		};
 	}
 
 	/** 최근 실행 목록 맨 앞에 추가하고(중복 제거, 최대 10개 유지) 저장한다. */
@@ -765,6 +846,20 @@ public final class MavenGoalsView extends ViewPart
 		MenuManager manager = new MenuManager();
 		manager.setRemoveAllWhenShown(true);
 		manager.addMenuListener(m -> {
+			FavoriteNode favorite = selectedFavorite();
+			if (favorite != null)
+			{
+				m.add(new Action(Messages.get("menu.run"))
+				{
+					@Override
+					public void run()
+					{
+						runEntry(favorite.entry());
+					}
+				});
+				m.add(removeFavoriteAction(favorite));
+				return;
+			}
 			if (!(viewer.getSelection() instanceof IStructuredSelection ss) || !(ss.getFirstElement() instanceof MavenGoal g))
 				return;
 			if (g.getGoal() != null)
@@ -809,9 +904,10 @@ public final class MavenGoalsView extends ViewPart
 	{
 		if (favoritesAction == null)
 			return;
-		boolean on = viewer.getSelection() instanceof IStructuredSelection ss
-			&& ss.getFirstElement() instanceof MavenGoal g
-			&& isFavorite(g);
+		boolean on = selectedFavorite() != null
+			|| viewer.getSelection() instanceof IStructuredSelection ss
+				&& ss.getFirstElement() instanceof MavenGoal g
+				&& isFavorite(g);
 		favoritesAction.setImageDescriptor(
 			AbstractUIPlugin.imageDescriptorFromPlugin(
 				"com.kcube.mavenview",
@@ -870,6 +966,12 @@ public final class MavenGoalsView extends ViewPart
 					toggleFavorite(g);
 				}
 			});
+			manager.add(new Separator());
+		}
+		FavoriteNode selected = selectedFavorite();
+		if (selected != null)
+		{
+			manager.add(removeFavoriteAction(selected));
 			manager.add(new Separator());
 		}
 		if (history.favorites().isEmpty() && history.recents().isEmpty())
