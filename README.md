@@ -3,7 +3,7 @@
 Eclipse Plug-in for displaying Maven lifecycle phases and plugin goals in an Ant View-like tree.
 
 ## Features
-- Detect selected Eclipse Maven project / pom.xml
+- Register projects by dragging a `pom.xml`, a project folder or an Eclipse project onto the view; the list is kept per workspace
 - Display Maven lifecycle phases
 - Display Maven plugins and configured executions
 - Common goals of well-known plug-ins (e.g. `war:exploded`, `dependency:tree`, `spring-boot:run`) are listed even without an `<execution>`; `war`/`ear` packaging shows the WAR/EAR plug-in even when it is not declared
@@ -11,7 +11,7 @@ Eclipse Plug-in for displaying Maven lifecycle phases and plugin goals in an Ant
 - Double-click a lifecycle phase or plugin goal to run Maven
 - Run Maven through the local `mvn` executable
 - Output Maven stdout/stderr to an Eclipse Console
-- Refresh from the current selection
+- Reload changed `pom.xml` files automatically, or all of them with *Refresh All* (Cmd/Ctrl+Shift+F5)
 - Eclipse 4.x / Java 17+ target (built with `--release 17`)
 
 ## Limitations
@@ -28,6 +28,7 @@ Requires Eclipse 2023-09 or later with m2e (included in most Eclipse packages) a
 2. Location: `https://leejy-jpg.github.io/kcube-maven-goals-plugin/`
 3. Select **KCube Maven Tools** > **KCube Maven Goals**, then finish and restart Eclipse.
 4. Open Window > Show View > Other... > **Maven Goals**.
+5. Drag a `pom.xml`, a project folder or an Eclipse project onto the view to register it.
 
 > **Note:** The plug-in is not code-signed, so Eclipse shows a "Trust Artifacts" dialog
 > ("Do you trust unsigned content of unknown origin?") during installation.

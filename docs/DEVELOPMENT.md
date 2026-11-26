@@ -44,6 +44,8 @@ src/com/kcube/mavenview/
 - 등록 목록은 Eclipse workspace preferences(`InstanceScope`)에 저장되어 재시작해도 유지됨.
 
 ### 3. 등록 방법 다양화
+> 현재는 툴바의 **Add POM File...** / **Add from Selection** 버튼을 숨겨(`ViewToolbar`에서 `toolbar.add` 주석 처리) **드래그 앤 드롭으로만** 등록한다. 관련 코드(`PomAdder`, `PomScanner`, `SelectionTracker`)는 남아 있어 주석을 풀면 다시 쓸 수 있다. 아래의 두 버튼 설명(14, 17절, 알려진 제한사항 포함)은 그 기준이다.
+
 - 툴바 **Add POM File...**: 파일 다이얼로그로 디스크에서 pom.xml 선택(다중 선택 가능).
 - 툴바 **Add from Selection**: Project/Package Explorer 등 **다른 뷰**에서 마지막으로 선택했던 리소스의 pom.xml을 등록.
   - 최초 구현 시, 버튼을 누르는 순간 포커스가 본 뷰로 넘어가며 Eclipse 전역 선택 서비스가 "현재 활성 파트의 선택"(본 뷰 자신의 트리)을 반환하는 버그가 있었음 → 다른 파트의 선택을 별도 리스너로 계속 추적/캐시하도록 수정.
@@ -183,7 +185,7 @@ org.eclipse.m2e.core.ui     (Update Maven Project)
 
 ## 알려진 제한사항 / 참고
 - `org.eclipse.m2e.actions.MavenLaunchConstants`는 m2e 내부(`x-internal`) API라, m2e 버전이 바뀌면 호환이 깨질 가능성이 있다.
-- "Add from Selection"은 워크스페이스 리소스(Project Explorer 등) 선택만 추적하며, Finder 같은 외부 앱의 선택은 추적하지 않는다(드래그 앤 드롭으로 보완).
+- (버튼 숨김 상태) "Add from Selection"은 워크스페이스 리소스(Project Explorer 등) 선택만 추적하며, Finder 같은 외부 앱의 선택은 추적하지 않는다.
 - Update Maven Project는 워크스페이스에 이미 임포트된 프로젝트에만 동작하며, 파일 다이얼로그/드래그로 등록한 워크스페이스 밖의 pom.xml에는 적용되지 않는다.
 
 ## 빌드 방법 (Tycho / p2 업데이트 사이트)

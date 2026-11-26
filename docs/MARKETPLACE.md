@@ -30,11 +30,11 @@ Browse Maven lifecycle phases and plugin goals in an Ant View-style tree and run
 KCube Maven Goals adds a **Maven Goals** view to Eclipse. It shows your Maven project's lifecycle phases and plugin goals in a tree, much like the Ant view, so you can run builds without typing commands.
 
 **Features**
-- Detects the selected Maven project or `pom.xml`
+- Add projects by dragging a `pom.xml` or project onto the view
 - Shows lifecycle phases, plugins and configured executions, including multi-module projects
 - Double-click a phase or goal to run it with your local `mvn`
 - Streams Maven output to an Eclipse Console
-- Goal filter and refresh (Cmd/Ctrl+Shift+F5)
+- Goal filter, automatic reload of changed `pom.xml` files, and refresh (Cmd/Ctrl+Shift+F5)
 
 **Requirements:** Eclipse 2023-09 or later, Java 17+, m2e, and a local Maven installation.
 

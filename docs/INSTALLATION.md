@@ -48,7 +48,7 @@
 
 1. 메뉴 `Window > Show View > Other…` 선택.
 2. 검색창에 `Maven Goals` 입력 → 선택 후 `Open`.
-3. Maven 프로젝트(워크스페이스에 있는 것)를 Project Explorer에서 선택하면 뷰 툴바의 **Add from Selection**(홈 아이콘) 버튼으로 등록하거나, pom.xml 파일을 뷰로 직접 드래그해서 등록할 수 있습니다.
+3. Project Explorer의 프로젝트나 `pom.xml`, 또는 Finder/탐색기의 `pom.xml` 파일이나 프로젝트 폴더를 뷰로 끌어다 놓아 등록합니다. 폴더나 프로젝트를 놓으면 그 바로 아래의 `pom.xml`이 등록됩니다.
 4. 등록된 프로젝트 트리에서 lifecycle phase나 plugin goal을 더블클릭하면 Maven이 실행되고 Console에 결과가 출력됩니다.
 
 ## 간단 사용법
@@ -57,9 +57,8 @@
 |---|---|
 | ☐ `mvn` (체크박스, 맨 왼쪽) | 체크: 외부 `mvn`(PATH) 사용 / 해제: Eclipse 내장 Maven(m2e) 사용 |
 | ▶ Run | 트리에서 선택한 goal 실행 (더블클릭과 동일) |
+| ■ Stop | 실행 중인 외부 `mvn` 빌드 중지 (내장 Maven은 Console의 Terminate 버튼 사용) |
 | Update Maven Project | 선택한 프로젝트의 pom.xml을 다시 읽고 의존성 재해석 (워크스페이스 프로젝트만) |
-| Add POM File... | 파일 다이얼로그로 디스크에서 pom.xml 등록 |
-| Add from Selection | 선택한 프로젝트(복수 가능)의 pom.xml을 자동으로 찾아 등록. 루트에 없으면 하위 폴더(4단계)까지 탐색하고, 후보가 여럿이면 체크 목록에서 고릅니다. 선택이 없으면 프로젝트를 고르게 합니다 |
 | Remove | 선택한 프로젝트를 목록에서 제거 |
 | Refresh All | 등록된 모든 pom.xml 재파싱 |
 | Expand All / Collapse All | 트리 펼치기/접기 (노드 선택 시 그 하위만 펼침) |
@@ -78,7 +77,7 @@
 
 ## 문제 해결
 
-- **뷰가 비어있음**: pom.xml을 선택한 뒤 아무 버튼도 누르지 않았을 수 있습니다. `Add from Selection` 또는 드래그 앤 드롭으로 등록해주세요.
+- **뷰가 비어있음**: 아직 등록한 pom.xml이 없는 상태입니다. `pom.xml` 파일이나 프로젝트를 뷰로 끌어다 놓아 등록해주세요.
 - **더블클릭해도 실행 안 됨 / "mvn을 찾을 수 없음" 오류**: 체크박스가 **체크(외부 mvn)** 상태인데 PATH에 mvn이 없는 경우입니다. 체크를 해제해 Eclipse 내장 Maven을 쓰거나, 터미널에서 `mvn -v`로 설치를 확인하세요.
 - **업데이트한 jar를 넣었는데 변경이 반영 안 됨**: `dropins/` 안에 같은 플러그인이 두 군데 이상 있으면(예: 하위 폴더 `com.kcube.mavenview/eclipse/plugins/` 안의 옛 jar) 옛 것이 로드될 수 있습니다. 옛 복사본을 `dropins` 밖으로 옮기고 jar 하나만 남긴 뒤 `-clean`으로 재실행하세요.
 - **업데이트 사이트로 설치한 적이 있는데 `dropins` jar가 무시됨 / 뷰가 사라짐**: p2로 설치된 `KCube Maven Goals`(feature)와 `dropins`의 jar가 같은 플러그인이라 충돌합니다. `plugins/`의 jar를 직접 지우지 말고, `Help > About Eclipse IDE > Installation Details > Installed Software`에서 **KCube Maven Goals를 Uninstall**하고 재시작한 뒤 `dropins` jar 하나만 남기세요. 설치는 한 가지 방식만 사용하세요.
